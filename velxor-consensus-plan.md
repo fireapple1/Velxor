@@ -10,11 +10,15 @@
   - Iter 1: Architect APPROVE-WITH-IMPROVEMENTS, Critic REVISE → v1 → v2
   - Iter 2: Architect APPROVE-WITH-MINOR-IMPROVEMENTS, Critic APPROVE-WITH-MINOR-IMPROVEMENTS → polish pass → final
 
+> **⚠️ Role 모델 supersede**: 본 문서의 단일-owner ("본인=Rust+UI+Interface Contract owner") 모델은
+> [`role-assignment.md`](./role-assignment.md)의 **3인 균등 분담 (A/B/C)** 으로 대체되었음. 본 문서는 **기술 명세의
+> source of truth**로 유지되며, ownership/시간 분배는 role-assignment.md를 기준으로 따른다.
+
 ## Requirements Summary (from spec)
 - Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신 (학교/공모전)
 - 4계층: C+WDK 커널 드라이버 / Rust 유저모드 서비스 / Python+AI 분석 엔진 / React+Electron UI
-- **합성 PoC만** (학습/시연 자체생성), 한 학기 ~80-120 user-hours
-- 본인=Rust+UI+Interface Contract owner, 팀원1=드라이버, 팀원2=Python+AI
+- **합성 PoC만** (학습/시연 자체생성), 한 학기 ~80-126 user-hours
+- 역할 분담은 [`role-assignment.md`](./role-assignment.md) (A/B/C 균등 ~40h)
 - 통합 전략 = **Walking Skeleton + Interface Evolution Gate**
 
 ## RALPLAN-DR Summary (short mode)
@@ -50,7 +54,9 @@
 - **AC1 — Walking Skeleton 시연**: 검증 = (a) `scripts/run-all.sh` exit 0, (b) `scripts/ws-record.sh` 캡처에 `node_add { event_type: "FileWrite" }` 메시지, (c) 각 팀원이 본인 머신에서 `run-all.sh` 재실행 시 동일 결과. 통과 시 git tag `walking-skeleton-v1`.
 - **AC2 — PoC 동작**: `scripts/poc-bench.sh` → wall-clock < 1s for 300 file ops (script exit 0).
 - **AC3 — 탐지 시연 화면**: PoC 실행 → OBS 영상 + **frame-at-1000ms screenshot**에 빨간 노드 + verdict panel 가시.
-- **AC4 — 지연시간**: Rust `tracing` 로그에서 `event_received_ts → ws_sent_ts` **p99 < 1000ms**. **Sub-budget**: classifier `/classify` **p99 < 100ms** (gunicorn 2 workers).
+- **AC4 — 지연시간**:
+  - **AC4-측정**: Rust `tracing` 로그에서 `event_received_ts → ws_sent_ts` **p99 < 1000ms**. **Sub-budget**: classifier `/classify` **p99 < 100ms** (Waitress threads=4). 산출 = `scripts/eval-ac4.sh`.
+  - **AC4-체감**: 데모 영상에서 PoC 실행 시작 → UI 빨간 표시 wall-clock **≤ 1초** (사용자 체감, OBS 영상 timestamp로 검증).
 - **AC5 — 분류 정확도**: `scripts/eval-ac5.sh` → markdown 표. 통과: **≥9/10 TP, ≤1/10 FP**.
   - **AC5a**: positive set ≥2 PoC variants (확장자/속도/사이즈 변형); ≥1 (`v3 .pdf → .locked, 200 files/2s`)은 학습 held-out.
   - **AC5b**: negative set에 bursty-but-benign workload 포함 (`robocopy /MIR`, 7zip 압축해제).
@@ -60,7 +66,7 @@
 - **AC7 — 발표 자료**: `docs/DEMO-SCRIPT.md` + 30-60초 영상 파일 존재.
 - **AC8 — Stub 영속성**: Stub code path가 env flag로 재활성. 검증 = `VELXOR_STUB=both`, `VELXOR_STUB=driver`, `VELXOR_STUB=engine` **3가지 단독 모드 모두** smoke test 통과.
 
-## Hour Ledger (≤120h ceiling)
+## Hour Ledger (≤126h ceiling, 트리거 >145h)
 
 | Bucket | Hours | Notes |
 |--------|-------|-------|
@@ -72,11 +78,11 @@
 | Week 6-7 (합성 PoC v1/v2/v3 + 데이터셋 + AC5a/b) | 20 | (~15 base + ~5 variant/bursty-benign) |
 | Week 8-9 (통합, 차단, 리허설, AC5 측정) | 15 | |
 | Week 10 (발표) | 10 | |
-| Architect/Critic 추가 작업 (transport doc, gunicorn, WS framing/replay separate, stub env flag plumbing) | 8-10 | 해당 주에 흡수 |
-| **Total** | **~116-124h** | **ceiling 120h 대비 +0~+3%, deferral 트리거(>115%, 즉 >138h)에 미달 → 자동 절단 불필요** |
+| Architect/Critic 추가 작업 (transport doc, Waitress 전환, WS framing/replay separate, stub env flag plumbing) | 8-10 | 해당 주에 흡수 |
+| **Total** | **~116-126h** | **ceiling 126h 부합, deferral 트리거 >145h(126×1.15)에 미달 → 자동 절단 불필요.** (3인 균등 분담은 [`role-assignment.md`](./role-assignment.md) 참조) |
 
 ### Deferral Order (사전 정의)
-누적 hours > planned×1.15 (즉 ≥138h) 시 아래 순서로 자른다:
+누적 hours > planned×1.15 (즉 ≥145h) 시 아래 순서로 자른다:
 1. 2.4 사운드 효과 (Web Audio)
 2. 2.2 Threat Timeline (D3) → 간단 리스트 뷰로 대체
 3. 8.1 자동 차단 → Block 버튼 수동 차단만 유지
@@ -89,30 +95,38 @@
 - 0.2 `bcdedit /set testsigning on` + WDK 샘플 hello-world signed driver 로드 검증 → **Week 0 AC**
 - 0.3 `cargo new velxor-rust-service` 컴파일 OK (deps: tokio, tokio-tungstenite, reqwest, serde, tracing)
 - 0.4 `npm create vite@latest velxor-ui -- --template react-ts` + electron + `@xyflow/react` dev server
-- 0.5 Flask `/health` 200 (venv + Flask + gunicorn)
+- 0.5 Flask `/health` 200 (venv + Flask + **Waitress** threads=4; gunicorn은 Windows native 미지원이라 Waitress 사용)
 - 0.6 **ETW provider 스파이크**: PowerShell `Get-WinEvent` 또는 `xperf`로 file I/O 이벤트 1개 캡처 → driver fallback 경로 실증
 
 ### Week 1 — Walking Skeleton (~15h)
 - **1.1 Interface Contract v1-draft** → `Velxor/contracts/interface-schema.md` (semver: v1 = additive only)
 
-  **IOCTL `BehaviorEventV1`**:
+  **Driver→Service 메시지 `BehaviorEventV1` (FltMgr comm port)**:
   ```
   { schema_version: "1.0",
     seq: u64,                  // monotonic per session
     dropped_since_last: u32,   // kernel buffer pressure signal
     pid: u32, parent_pid: u32,
-    image_path: string,
+    image_path: string,        // UTF-16LE NUL-terminated, max 520 bytes (MAX_PATH 대응)
     event_type: enum(FileWrite|FileRename|ProcessCreate),
-    file_path: string?,
-    volume_id: string?,        // disambiguate across volumes
-    op_detail: object?,
+    file_path: string?,        // UTF-16LE NUL-terminated, max 520 bytes
+    volume_id: string?,        // disambiguate across volumes, UTF-8
+    op_detail: object?,        // event_type별 typed sub-record (FileWrite: u64 file_size, u32 entropy_hint)
     ts_unix_ms: u64 }
   ```
 
-  **IOCTL 전송**: `FltSendMessage` (kernel→user inverted call). 큐 깊이 1024, drop 시 `dropped_since_last` 증가.
+  **Wire encoding**: JSON UTF-8 payload, max 4 KiB per message (FltMgr 1 MiB cap의 0.4% — 헤드룸 충분). `image_path`/`file_path`는 사전 truncate 후 UTF-8로 직렬화 (kernel 측 UTF-16LE → user 측 UTF-8 변환). 경로 잘림 시 `op_detail.path_truncated: true` 표기.
+
+  **전송 메커니즘**: `FltSendMessage` (kernel→user inverted call, FltMgr **communication port**, *not* `IRP_MJ_DEVICE_CONTROL`/IOCTL). 큐 깊이 1024, drop 시 `dropped_since_last` 증가.
   ⚠️ **`FltSendMessage`는 user-mode 응답까지 kernel을 블록할 수 있음**. user-mode reader는 별도 thread에서 dequeue하여 burst 시 kernel-side stall 회피.
 
-  **REST `POST /classify`** (Flask + gunicorn 2 workers, classifier p99 < 100ms sub-budget):
+  **Kernel-side 송신 정책** (architectural critical):
+  - `FltSendMessage` `Timeout` 파라미터 = 10ms (bounded, retry 없음)
+  - any lock 보유 중 송신 **금지** (사전 enqueue → worker thread dispatch)
+  - DPC/APC/critical region context에서 송신 **금지**
+  - timeout 또는 큐 full 발생 시 → `dropped_since_last++` 후 다음 successful send에 동봉 (silent drop 금지)
+
+  **REST `POST /classify`** (Flask + **Waitress** threads=4, classifier p99 < 100ms sub-budget; gunicorn은 Windows fork() 미지원으로 채택 불가):
   ```
   req:  { events: BehaviorEventV1[], window_ms: u32 }
   resp: { verdict: enum(benign|ransomware), confidence: f32, evidence: string[],
@@ -123,9 +137,15 @@
   ```
   { schema_version: "1.0",
     seq: u64,
-    type: enum(node_add|node_update|verdict|alert),
+    type: enum(node_add|node_update|verdict|alert|gap),
     payload: object }
   ```
+
+  **Reconnect 프로토콜**:
+  - Client 연결 시 query param `?last_seq=N` 전달 (최초 연결은 `0` = 전체 replay).
+  - Server: `VecDeque` 내 seq > N 메시지를 즉시 push, 이후 live broadcast로 전환.
+  - 5초 초과로 N+1이 VecDeque에 없으면 → `{type: "gap", payload: { from: N+1, to: head_seq }}` 송신. UI는 full refresh 모드 진입.
+  - Client dedupe: 동일 seq 중복 수신 시 두 번째 무시 (idempotent UI 갱신).
 
   **Evolution policy**:
   - v1.x = additive only (새 optional field만)
@@ -135,13 +155,13 @@
   **`VELXOR_STUB` env flag semantics**:
   | Value | Rust 측 | Python 측 |
   |-------|---------|-----------|
-  | `unset` (default) | 실제 IOCTL 어댑터 사용 | 학습된 모델 또는 rule-based fallback |
+  | `unset` (default) | 실 FltMgr comm port 어댑터 사용 | 학습된 모델 또는 rule-based fallback |
   | `driver` | `events.jsonl` 폴링 (driver stub) | 변경 없음 |
   | `engine` | 변경 없음 | Week 1 하드코드 verdict `{ransomware, 0.95}` |
   | `both` | `events.jsonl` 폴링 | 하드코드 verdict |
 
 - 1.2 Rust service stub (`Velxor/rust-service/`): `events.jsonl` poll, REST stub call, WS server with separate replay `VecDeque`.
-- 1.3 Python engine stub (`Velxor/python-engine/`): Flask + gunicorn 2 workers, 하드코드 verdict.
+- 1.3 Python engine stub (`Velxor/python-engine/`): Flask + Waitress threads=4 (Windows fork() 미지원으로 gunicorn 대체), 하드코드 verdict.
 - 1.4 UI stub (`Velxor/ui/`): Electron + Vite + React Flow, WS client with reconnect.
 - 1.5 `scripts/run-all.sh` + `scripts/ws-record.sh` (WS 메시지 캡처용, AC1 검증).
 - 1.6 **Mechanical schema acknowledgment**: 팀원1/팀원2가 schema 읽고 "컴파일 가능" 한 줄 응답. 의미 검토는 Week 3.
@@ -175,7 +195,7 @@
 - 6.6 UI 통합 검증 (full pipeline 1회)
 
 ### Week 8-9 — 통합 + 차단 + AC5 측정 (~15h)
-- **8.1 자동 차단** (Deferral 후보 #3) — Rust → `TerminateProcess(pid)` 또는 UI Block 버튼 → IPC → kill
+- **8.1 자동 차단** (Deferral 후보 #3) — Rust → `OpenProcess(PROCESS_TERMINATE, false, pid)` → `TerminateProcess(handle, 1)` → `CloseHandle(handle)` (또는 UI Block 버튼 → IPC → 동일 시퀀스). handle open 실패/terminate 실패 시 fallback 로그.
 - 8.2 `docs/DEMO-SCRIPT.md` (1분 흐름)
 - 8.3 UI 폴리싱 (애니메이션, 색상, 타이밍)
 - **8.4 AC5 측정**: `scripts/eval-ac5.sh` — v1+v2 학습, v3 held-out + robocopy/7z negative로 평가, `docs/AC5-results.md` 산출.
@@ -195,13 +215,13 @@ Velxor/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs
-│       ├── driver_source.rs      # events.jsonl ↔ IOCTL adapter (env flag switch)
+│       ├── driver_source.rs      # events.jsonl ↔ FltMgr comm port adapter (env flag switch)
 │       ├── aggregator.rs         # sliding window per PID
 │       ├── classifier_client.rs
 │       └── ws_broadcaster.rs     # broadcast + separate VecDeque replay
 ├── python-engine/
 │   ├── app.py
-│   ├── gunicorn_conf.py
+│   ├── waitress_conf.py            # Waitress threads=4 (Windows native WSGI)
 │   ├── features.py
 │   ├── fallback_rules.py         # rule-based fallback (AC8 path)
 │   ├── requirements.txt
@@ -220,6 +240,7 @@ Velxor/
 │   ├── run-all.sh
 │   ├── ws-record.sh
 │   ├── poc-bench.sh
+│   ├── eval-ac4.sh                # tracing JSON → p99 출력 (AC4-측정)
 │   ├── eval-ac5.sh
 │   └── ac6-verify-block.sh
 └── docs/
@@ -241,7 +262,7 @@ Velxor/
 | Driver crash → BSOD | Low | High | 리허설 중 BSOD 1회 이상 | VM snapshot rollback (<60s); 리허설 3회 중 1회 BSOD 시 `VELXOR_STUB=driver` 데모 모드 |
 | WS reconnect 불안정 | Medium | Low | 리허설 중 끊김 관측 | Rust 5초 replay (separate VecDeque) + UI exponential backoff + Electron dev 핫리로드 disable |
 | 합성 PoC 일반화 의문 | Medium | Low | 발표 Q&A | AC5c slide note + "real-world testing future work" |
-| **시간 예산 ≥115% 초과 (>138h)** | **High** | **Medium** | **누적 hours > 138** | **사전 정의 deferral order 자동 적용** (사운드 → Timeline → 자동차단 → 백업영상) |
+| **시간 예산 ≥115% 초과 (>145h)** | **High** | **Medium** | **누적 hours > 145** | **사전 정의 deferral order 자동 적용** (사운드 → Timeline → 자동차단 → 백업영상) |
 | Week 0+1 부하 집중 (~21-23h) | High | Medium | 학기 전 주말 + Week 1 | Week 0를 학기 시작 ≥1주 전 완료, schema/stub만 Week 1 |
 | Week 3 review 응답 부진 | Medium | Low | 48h 후 teammate 노트 0건 | v1.1 본인 단독 발행 (Principle 4 — 의도된 trade) |
 | v1.0 필드 잘못 타입 결정 | Low | Medium | Week 3 review에서 wrong-typed 발견 | additive `*_v2` 필드 추가 + 슬라이드에서만 deprecated (escape hatch) |
@@ -253,7 +274,7 @@ Velxor/
 | AC1 | `run-all.sh` exit 0; `ws-record.sh` 캡처에 `node_add{event_type:"FileWrite"}`; teammate 재현; git tag `walking-skeleton-v1` |
 | AC2 | `poc-bench.sh` exit 0 (wall-clock < 1s for 300 ops 출력) |
 | AC3 | OBS 영상 + `docs/AC3-evidence/frame-1000ms.png` |
-| AC4 | `tracing` JSON 분석 스크립트 출력 (event→ws p99<1000ms, classify p99<100ms) |
+| AC4 | `scripts/eval-ac4.sh` 출력 (event→ws p99<1000ms, classify p99<100ms); 데모 영상 timestamp로 체감 ≤1s 검증 |
 | AC5/5a/5b/5c | `docs/AC5-results.md` (held-out v3 표시, robocopy/7z workload 라벨), slides.pdf 페이지 X disclaimer |
 | AC6 | `scripts/ac6-verify-block.sh` 자동화 (`tasklist /fi "pid eq <PID>"` 빈 결과 또는 ps exit≠0) |
 | AC7 | `docs/DEMO-SCRIPT.md` + `videos/demo.mp4` (≥30s) |
@@ -261,10 +282,10 @@ Velxor/
 
 ## ADR
 
-**Decision**: Walking Skeleton + Interface Evolution Gate. 본인 = interface contract owner; Week 0 환경 셋업 (additive) → Week 1 v1-draft + 4계층 stub end-to-end → Week 3 async v1.1 review (48h, 무응답 시 본인 단독) → Week 4+ Stub Retention Gate(env flag `VELXOR_STUB`로 stub code-path 영속) → Week 8-9 통합/측정 → Week 10 발표.
+**Decision**: Walking Skeleton + Interface Evolution Gate. Interface Contract owner = B ([`role-assignment.md`](./role-assignment.md) 참조); Week 0 환경 셋업 (additive) → Week 1 v1-draft + 4계층 stub end-to-end → Week 3 async v1.1 review (48h, 무응답 시 B 단독) → Week 4+ Stub Retention Gate(env flag `VELXOR_STUB`로 stub code-path 영속) → Week 8-9 통합/측정 → Week 10 발표.
 
 **Drivers**:
-1. 시간 제약 (≤120h ceiling, deferral 트리거 138h)
+1. 시간 제약 (≤126h ceiling 공식 조정, deferral 트리거 145h)
 2. 통합 리스크 최소화 (Week 1 skeleton + Week 3 evolution gate)
 3. 시연 임팩트 (≤1초 wow 모먼트, AC3/AC4)
 4. **팀원 통합 포인트는 명시, 의존성은 격리** (stub 영속 + 무응답 허용)
@@ -278,8 +299,8 @@ Velxor/
 **Why chosen**: 시간/통합/시연/팀원 4 driver를 모두 충족하는 유일한 옵션. v1.1 evolution gate가 pure WS의 "premature freeze" 약점을 완화하면서도 Module-First의 통합 폭풍을 회피. Stub Retention Gate가 팀원 지연을 흡수하면서도 통합 포인트 검증 가능성을 유지.
 
 **Consequences**:
-- 긍정: 본인이 system integrator 역할 (학습 큼), 매주 시연 가능, stub fallback이 곧 demo backup, 인터페이스 스키마가 산출물.
-- 부정: Week 0+1 부하 집중 (~21-23h); 무응답 팀원의 입력은 자동 누락(Principle 4 의도된 trade); v1.0 wrong-typed 필드는 `*_v2` parallel field로 우회해야 함 (escape hatch).
+- 긍정: B가 system integrator 역할 (학습 큼), 매주 시연 가능, stub fallback이 곧 demo backup, 인터페이스 스키마가 산출물. (A/B/C 분담은 [`role-assignment.md`](./role-assignment.md))
+- 부정: Week 0+1 부하 집중 (~21-23h); 무응답 작업자의 입력은 자동 누락(Principle 4 의도된 trade); v1.0 wrong-typed 필드는 `*_v2` parallel field로 우회해야 함 (escape hatch).
 
 **Follow-ups**:
 - Week 0 종료: tooling install AC (0.1-0.6) + ETW 스파이크 sign-off
@@ -291,15 +312,20 @@ Velxor/
 
 ## Consensus Audit Trail
 
+> **Note**: v1, v2 draft 본문은 main 브랜치에 포함되지 않음 (session-local). 필요 시 dev 브랜치 `docs/audit/consensus-plan-v1.md`, `docs/audit/consensus-plan-v2.md` 참조.
+
 ### Iteration 1
-- **Planner**: v1 draft (`.omc/drafts/velxor-consensus-plan-v1.md`)
-- **Architect**: APPROVE-WITH-IMPROVEMENTS — Week 0, v1-draft contract, Stub Deprecation Gate, per-layer fixes (IOCTL seq/dropped/volume_id/schema_version + FltSendMessage, REST gunicorn + p99<100ms, WS replay≥5s + seq + framing, UI batched dagre), AC5a/b/c.
+- **Planner**: v1 draft
+- **Architect**: APPROVE-WITH-IMPROVEMENTS — Week 0, v1-draft contract, Stub Deprecation Gate, per-layer fixes (BehaviorEventV1 seq/dropped/volume_id/schema_version + FltMgr comm port, REST workers + p99<100ms, WS replay≥5s + seq + framing, UI batched dagre), AC5a/b/c.
 - **Critic**: REVISE — vague risk mitigations, ADR Driver 4 contradiction, AC1/3/6/8 verification, hour ledger, Week 3 async 48h.
 
 ### Iteration 2
-- **Planner**: v2 draft (`.omc/drafts/velxor-consensus-plan-v2.md`) — applied all 10 above.
+- **Planner**: v2 draft — applied all 10 above.
 - **Architect**: APPROVE-WITH-MINOR-IMPROVEMENTS — 4 polish items (`VELXOR_STUB=driver`/`engine` AC8 verification, FltSendMessage non-blocking note, additive escape hatch, replay separate VecDeque).
 - **Critic**: APPROVE-WITH-MINOR-IMPROVEMENTS — 6 quality gates PASS; 3 wording clarifications (`VELXOR_STUB=engine` semantics, "Stub Retention Gate" rename, hour ledger wording).
+
+### Iteration 3 (post-CCG review, 2026-05-20)
+- **CCG**: Codex 16건 finding 산출, Gemini 429 실패. 적용 사항: (1) `IOCTL` → FltMgr comm port 용어 통일, (2) gunicorn → Waitress (Windows 호환), (3) `TerminateProcess(pid)` → handle 시퀀스 정정, (4) wire encoding 명세 추가, (5) kernel-side 송신 정책 보강, (6) WS reconnect handshake 추가, (7) hour ledger 120h → 126h 공식 조정, (8) 단일 owner 모델 → [`role-assignment.md`](./role-assignment.md) 3인 균등 분담 supersede.
 
 ### Final wording pass (applied to this final plan)
 1. AC8: `VELXOR_STUB=driver`, `=engine`, `=both` 3 모드 모두 검증 ✓
@@ -308,16 +334,14 @@ Velxor/
 4. WS: broadcast = live fan-out, replay = separate `VecDeque` ✓
 5. `VELXOR_STUB` semantics 표로 명시 ✓
 6. "Stub Deprecation Gate" → "Stub Retention Gate" ✓
-7. Hour ledger 트리거 명확화: 트리거 = >138h (120h × 1.15), 124h ≠ 트리거 ✓
+7. Hour ledger 트리거 명확화: 트리거 = >145h (126h × 1.15), 124h ≠ 트리거 ✓ *(Iteration 3에서 120h ceiling을 126h로 공식 조정함에 따라 트리거도 138h → 145h로 재계산)*
 
 ## Status
 
-🟡 **PENDING APPROVAL** — 사용자가 별도의 명시적 실행 승인을 하기 전까지 어떤 코드 변경/PR/실행/agent delegation도 일어나지 않습니다.
+🟡 **PENDING APPROVAL** — 사용자가 별도의 명시적 실행 승인을 하기 전까지 어떤 코드 변경/PR/실행도 일어나지 않습니다.
 
-다음 실행 옵션 (별도 승인 후):
-- `Skill("oh-my-claudecode:team")` — 병렬 팀 agent 실행 (이 계획에서는 Walking Skeleton stub 작업이 본인 단독이라 적합도 낮음)
-- `Skill("oh-my-claudecode:ralph")` — 지속 루프 실행 with architect verification (반복 큰 Rust/UI 작업에 적합)
-- `Skill("oh-my-claudecode:autopilot")` — 자동 종단 실행 (consensus 정제 거친 후엔 자율성 낮춰도 됨)
-- `Skill("compact")` 후 ralph — context 정리 후 실행
+다음 단계 (승인 후):
+- 작업자별 dev 브랜치(devA/devB/devC)에서 Week 0 tooling install 시작 (자세한 작업자별 일정은 [`role-assignment.md`](./role-assignment.md) Hour Ledger 참조)
+- 실행 자동화 도구 선택은 별도 협의
 
 실행 모드 선택은 사용자의 명시적 다음 메시지가 필요합니다.

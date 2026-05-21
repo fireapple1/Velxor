@@ -1,5 +1,12 @@
 # Deep Interview Spec: Velxor — 행위 기반 백신 (합성 PoC 데모)
 
+> **⚠️ Historical artifact**: 본 문서는 2026-05-20 시점의 6라운드 Socratic interview 결과이며,
+> **의사결정 기록 보존 목적**으로만 유지됩니다. 일부 기술 표현(XGBoost/RF, pefile, VirusTotal 보조)과
+> 단일 owner 모델("본인=Rust+UI+인터페이스 스키마")은 이후 [`velxor-consensus-plan.md`](./velxor-consensus-plan.md)
+> 및 [`role-assignment.md`](./role-assignment.md)에서 **제거/대체**되었습니다.
+> - **기술 명세 source of truth**: `velxor-consensus-plan.md`
+> - **현재 역할 분담**: `role-assignment.md` (A/B/C 3인 균등)
+
 ## Metadata
 - **Interview ID**: velxor-2026-05-20
 - **Rounds**: 6 (+ Round 0 topology gate)
@@ -8,7 +15,7 @@
 - **Generated**: 2026-05-20
 - **Threshold**: 20%
 - **Initial Context Summarized**: Yes (velxor_planning_doc.html → summary)
-- **Status**: PASSED
+- **Status**: PASSED (historical, superseded by consensus-plan + role-assignment)
 
 ## Clarity Breakdown
 | Dimension | Score | Weight | Weighted |
@@ -27,7 +34,7 @@ Round 0에서 확정된 4개 활성 컴포넌트, 0 deferred.
 |-----------|--------|-------------|------------------|
 | 커널 드라이버 (C + WDK) | active | Ring 0 미니필터, 파일 I/O 후킹, 프로세스 생성 콜백, IOCTL 송신 | 팀원1 책임. 합성 PoC의 파일 burst를 감지 |
 | Rust 유저모드 서비스 | active | IOCTL 수신 → 이벤트 집계 → REST 호출 → WebSocket 푸시 | 본인 책임. 인터페이스 스키마 설계 owner |
-| 분석 엔진 (Python) | active | Flask REST, 행위 로그 feature 추출, XGBoost/RF binary classifier | 팀원2 책임. 합성 PoC 자체생성 학습 데이터로 학습 |
+| 분석 엔진 (Python) | active | Flask REST, 행위 로그 feature 추출, 행위 기반 binary classifier | 팀원2 책임. 합성 PoC 자체생성 학습 데이터로 학습 (구체 알고리즘은 consensus-plan에서 미지정, fallback은 `fallback_rules.py`) |
 | UI (React + Electron) | active | 프로세스 트리, 위협 타임라인, AI 판정 + 신뢰도, 차단/허용 | 본인 책임. "프로세스 트리 폭발" 데모 모먼트 |
 
 ## Goal
@@ -41,14 +48,14 @@ Windows 커널 레벨에서 **랜섬웨어의 파일 암호화 행위**를 실�
 - **환경**: Windows 10/11 격리 VM, 테스트 서명 모드 (`bcdedit /set testsigning on`), BSOD 회피
 - **팀**: 본인(Rust+UI+인터페이스 스키마), 팀원1(C 드라이버), 팀원2(Python 엔진+AI)
 - **통합 전략**: Walking Skeleton — Week 1에 본인이 IOCTL/REST/WS 스키마 잠그고 4계층 stub end-to-end 동작 확보 후 점진 교체
-- **언어/스택**: C+WDK, Rust(tokio+tungstenite), Python(Flask, pefile 격하, XGBoost/RF), TypeScript+React+Electron+React Flow/D3
+- **언어/스택**: C+WDK, Rust(tokio+tungstenite), Python(Flask + Waitress, 행위 기반 분류 모델 + `fallback_rules.py`), TypeScript+React+Electron+React Flow/D3
 
 ## Non-Goals
 - 실제 사용자 배포, 프로덕션 안정성, 운영급 false positive 관리
 - WHQL 서명, 시그너처 DB, 자동 업데이트 메커니즘
 - 실제 ransomware 샘플 수집/실행
 - 랜섬웨어 외 위협 시나리오 (프로세스 인젝션, 정보 탈취, persistence 등)
-- VirusTotal 의존성, 정적 PE 분석을 메인 메커니즘으로 사용 (보조 가능)
+- VirusTotal 의존성, 정적 PE 분석 (consensus-plan에서 **구현 비범위로 확정**; 행위 로그 only)
 - AI 모델 학술 수준 평가 (EMBER 벤치마크 등)
 
 ## Acceptance Criteria
@@ -66,7 +73,7 @@ Windows 커널 레벨에서 **랜섬웨어의 파일 암호화 행위**를 실�
 |------------|-------------------|------------|
 | "행위 기반 탐지 = 실제 랜섬웨어 샘플 실행이 필요" | R4 Contrarian: 합성 PoC가 안전/재현/자체생성 가능, 동일한 시각적 임팩트 | 합성 PoC only |
 | "기획서의 모듈→통합 순서가 표준" | R6 Simplifier: 마지막 통합 구간 폭발 리스크 | Walking Skeleton, Week 1에 스키마 잠금 |
-| "PE 정적 분석 + VirusTotal이 핵심 메커니즘" | R2 Goal Clarity: 행위 기반의 의미를 명세 | 파일 I/O 행위가 primary, PE는 보조 |
+| "PE 정적 분석 + VirusTotal이 핵심 메커니즘" | R2 Goal Clarity: 행위 기반의 의미를 명세 | 파일 I/O 행위 only (PE/VirusTotal은 consensus-plan에서 구현 비범위로 확정) |
 | "프로덕션급 백신 완성" | R1 Project Type: 데모/공모전 위주 | 데모 임팩트가 evaluation criterion |
 | "AI 모델 다범주 분류 필요" | R2 정착: 랜섬웨어 전용 | binary classifier (랜섬웨어 vs 정상) 충분 |
 | "4계층 토폴로지 자명" | R0 Topology Gate | 4계층 모두 active 확정 (deferred 없음) |
@@ -79,7 +86,7 @@ Windows 커널 레벨에서 **랜섬웨어의 파일 암호화 행위**를 실�
 - **기획서 대비 변경사항**:
   - 데이터 소스: 실제 샘플 → 합성 PoC
   - 통합 순서: 모듈 우선 → Walking Skeleton (인터페이스 우선)
-  - VirusTotal/PE 정적 분석: 보조로 격하
+  - VirusTotal/PE 정적 분석: **구현 비범위**로 확정 (consensus-plan에서 완전 제거; 행위 로그 only)
 
 ## Week-by-Week Roadmap (Walking Skeleton)
 | Week | Goal | 본인 작업 | 팀 작업 |
