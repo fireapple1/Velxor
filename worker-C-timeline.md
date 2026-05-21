@@ -38,9 +38,14 @@ source .venv/Scripts/activate
 # (WSL/Linux면: source .venv/bin/activate)
 
 pip install --upgrade pip
-pip install "flask==3.0.*" "waitress==3.0.*" "numpy==1.26.*"
+pip install "flask==3.0.*" "waitress==3.0.*" "numpy==1.26.*" \
+            "scikit-learn==1.4.*" "requests==2.*"
 pip freeze > requirements.txt
 ```
+
+> *(노하우)* Windows Git Bash에서는 `.venv/Scripts/activate`, WSL/순수 Linux에서는 `.venv/bin/activate`를 사용해야 PATH와 `VIRTUAL_ENV`가 올바르게 주입된다. 잘못된 경로면 `which python`이 시스템 파이썬을 가리키고 이후 `pip install`이 venv 밖으로 흘러간다.
+>
+> *(왜 의존성을 한꺼번에 깔아두나)* `scikit-learn`은 Week 6.6 학습 단계, `requests`는 Week 6.7 p99 자가측정 스크립트에서 import된다. Week 0에 미리 잠가두지 않으면 Week 6의 22h 단일 블록 한복판에서 의존성 설치/버전 충돌로 시간을 잃는다.
 
 ### 1.2 `app.py` — `/health` 200 골격
 `python-engine/app.py`:
@@ -54,6 +59,8 @@ def health():
     return jsonify(status="ok"), 200
 ```
 
+> *(참조)* `jsonify`는 dict/kwargs → JSON 직렬화 + `Content-Type: application/json` 헤더를 자동 설정한다. 직렬화 옵션·헤더 처리 메커니즘은 Flask 공식 문서의 *Response objects* 절을 참조.
+
 ### 1.3 `waitress_conf.py` — Waitress threads=4
 `python-engine/waitress_conf.py`:
 ```python
@@ -64,16 +71,23 @@ if __name__ == "__main__":
     serve(app, host="127.0.0.1", port=8765, threads=4)
 ```
 
+> *(개념)* Flask 내장 dev 서버는 단일 스레드 동기 처리라 `/classify` 요청 1건이 IO blocking에 들어가면 후속 요청이 줄을 선다. Waitress는 production-grade WSGI 서버로 worker thread pool을 둔다. `threads=4`는 Python GIL 제약 아래에서 IO-blocking 동안 다른 요청을 받기 위한 실용적 최소값으로, AC4의 `/classify p99<100ms` sub-budget을 직선적으로 깎는 첫 번째 손잡이다.
+>
+> *(참조)* thread 수·`channel_timeout`·`expose_tracebacks` 같은 추가 튜닝 옵션은 Waitress 공식 문서의 *Arguments to `waitress.serve`* 절을 참조.
+
 ### 1.4 Week 0 검증 게이트
 ```bash
 python waitress_conf.py &
 SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
 sleep 1
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8765/health   # 200 기대
-kill $SERVER_PID
+curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8765/health   # 200 기대
+# trap이 EXIT에서 자동 종료 — 중간 실패 시에도 포트 8765 누수 방지
 
 python -c "import waitress; print(waitress.__version__)"                  # 3.x
 ```
+
+> *(체크리스트)* 이 curl 한 줄이 통과되면 `웹 서버 부팅 → 포트 바인딩 → HTTP 파싱 → Flask 라우팅 → jsonify 응답` 전체 파이프라인이 살아있다는 것이 확인된다. `-f`는 4xx/5xx에서도 exit 0이 되는 함정을 막는다.
 
 ### 1.5 커밋
 ```bash
@@ -115,6 +129,8 @@ def classify():
     ), 200
 ```
 
+> *(개념)* `VELXOR_STUB=engine`은 작업자 A(Rust)/B(UI) 진행 지연 시에도 엔진을 단독으로 띄워 데모/통합테스트가 끊어지지 않게 만드는 격리 토글이다. AC8(stub smoke)이 요구하는 "엔진 단독 200 응답" 조건의 진입점이며, Week 6+에서 모델 추론이 깨졌을 때 즉시 rule-based로 fallback하는 우회로이기도 하다.
+
 ### 2.2 `fallback_rules.py` — 골격 (Week 6에 본구현)
 `python-engine/fallback_rules.py`:
 ```python
@@ -147,6 +163,8 @@ def classify_events(events: list[dict], window_ms: int) -> dict:
     }
 ```
 
+> *(개념)* "영속 백업"은 모델 pickle 깨짐·학습 미달·`/classify p99>100ms` 등 어떤 모델 측 사고가 나도 엔진이 **항상 200을 반환**하도록 보장하는 마지막 안전망이다. 모델 성능 하락은 발표에서 설명 가능한 리스크지만, 200을 못 돌려주는 엔진은 AC8/AC4 둘 다 무효화하므로 가용성 우선순위가 정확도보다 높다.
+
 ### 2.3 Schema v1-draft mechanical ack
 - B가 `contracts/interface-schema.md` 발행 알림이 오면, 그 PR에 **한 줄 코멘트**로 "compiles-against-engine: OK" 또는 컴파일 가능 여부만 응답. (의미 검토는 Week 3.)
 
@@ -155,14 +173,14 @@ def classify_events(events: list[dict], window_ms: int) -> dict:
 cd python-engine && source .venv/Scripts/activate
 VELXOR_STUB=engine python waitress_conf.py &
 SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
 sleep 1
 
-curl -s -X POST http://127.0.0.1:8765/classify \
+curl -fsS -X POST http://127.0.0.1:8765/classify \
   -H "Content-Type: application/json" \
   -d '{"events":[],"window_ms":1000}' | tee /tmp/classify-stub.json
 # 기대: verdict=ransomware confidence=0.95 model_version=stub-v1
-
-kill $SERVER_PID
+# trap EXIT이 자동으로 SERVER_PID 종료 — curl 실패 시에도 포트 누수 없음
 ```
 
 루트에서 `scripts/run-all.sh` 통과 (B 주관) + `ws-record.sh` 캡처 확인 후 **AC1 통과 태그**는 B가 push:
@@ -209,6 +227,9 @@ B가 v1.1 review 트리거를 보내는 순간부터 **48시간 카운트다운 
 - [ ] `resp.evidence[]` string 배열로 충분한가, 아니면 (k, v) typed 객체가 필요한가? (UI 패널 표시 vs 모델 디버깅)
 - [ ] `model_version` 문자열 포맷 컨벤션 (예: `rule-based-v1`, `xgb-2026w7-r3`) 명시 부재?
 - [ ] 응답 시간 SLA(p99<100ms)가 명시되어 있는가? — Waitress threads=4 sub-budget
+
+> *(개념)* **sliding window**는 "직전 N ms 동안의 이벤트"만 묶어 분석하는 시간 창. `window_ms`의 시작/끝 기준(요청 도착 시각 기준의 backward window인지, 이벤트 ts 기준인지)이 학습 데이터 생성과 추론 시 동일해야 한다.
+> **p99 latency**는 요청 응답시간을 정렬했을 때 99번째 백분위 — 즉 1%의 worst-case tail. 평균(mean)은 outlier에 둔감해 SLA 판정에 부적합하다.
 
 ### 4.2 코멘트 템플릿
 ```text
@@ -269,6 +290,8 @@ git commit -m "C: week4-5 PoC v1 simulator skeleton (.docx -> .docx.enc, 300 fil
 git push
 ```
 
+> *(노하우)* 벤치마킹에 `time.time()` 대신 `time.perf_counter()`를 쓰는 이유: 전자는 wall-clock으로 NTP 보정·DST·시간대 변경 영향을 받아 음수 elapsed가 나올 수 있다. `perf_counter`는 monotonic + 가장 높은 해상도(보통 ns 단위)라 sub-ms 측정에 안전하다. AC2가 ms 경계값(1000ms) 근방이라 해상도가 결과를 가른다.
+
 ---
 
 ## 6. Week 6-7 — PoC + 데이터셋 + 학습 (목표: 22h, **최대 부하 구간**)
@@ -276,29 +299,42 @@ git push
 > ⚠️ **이 구간이 C의 전체 일정에서 가장 큰 블록**. 아래 6단계를 **순서대로** 진행. 각 단계는 독립 PR로 분리해도 좋다.
 
 ### 6.1 [Day 1-2, 4h] PoC v1 본구현 + AC2 검증
-- 5.1의 `simulate.py`를 그대로 사용 (이미 작성됨).
-- 추가: `scripts/poc-bench.sh` 작성.
+- 5.1의 `simulate.py`를 그대로 사용 — 단, AC2는 **rename/write 구간만**(파일 사전 생성 + Python 인터프리터 부팅 제외) 측정해야 하므로 `simulate.py` 출력을 기계 파싱 가능한 한 줄로 강화한다.
+
+`poc-samples/ransomware_simulator/v1/simulate.py` 출력 형식 보강 (`run()` 마지막 줄):
+```python
+    # 기존 print 대신 — 기계 파싱 가능한 키=값 토큰을 추가 emit
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    print(f"v1: {count} ops in {elapsed_ms:.3f} ms ({count/(elapsed_ms/1000):.0f} ops/s)")
+    print(f"AC2_MEASURED_MS={elapsed_ms:.3f}")   # poc-bench.sh가 grep
+```
 
 `scripts/poc-bench.sh`:
 ```bash
 #!/usr/bin/env bash
-# AC2: 300 file ops wall-clock < 1s
+# AC2: 300 file ops measured 구간만 wall-clock < 1s (Python 부팅/파일 prep 제외)
 set -euo pipefail
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-START_MS=$(python -c "import time; print(int(time.time()*1000))")
-python poc-samples/ransomware_simulator/v1/simulate.py "$TMP" --count 300
-END_MS=$(python -c "import time; print(int(time.time()*1000))")
+# simulate.py 내부 perf_counter 결과를 신뢰 (sub-ms 해상도 + monotonic)
+OUTPUT=$(python poc-samples/ransomware_simulator/v1/simulate.py "$TMP" --count 300)
+echo "$OUTPUT"
 
-ELAPSED=$((END_MS - START_MS))
-echo "AC2 wall-clock: ${ELAPSED} ms"
-if [ "$ELAPSED" -lt 1000 ]; then
+ELAPSED_MS=$(echo "$OUTPUT" | grep -oE 'AC2_MEASURED_MS=[0-9.]+' | cut -d= -f2)
+if [ -z "$ELAPSED_MS" ]; then
+  echo "AC2 FAIL — simulate.py did not emit AC2_MEASURED_MS" >&2
+  exit 2
+fi
+
+echo "AC2 measured-ops wall-clock: ${ELAPSED_MS} ms"
+# bash arithmetic은 정수만 — awk로 float 비교
+if awk "BEGIN {exit !($ELAPSED_MS < 1000)}"; then
   echo "AC2 PASS"
   exit 0
 else
-  echo "AC2 FAIL (>=1000ms)"
+  echo "AC2 FAIL (>=1000ms — do NOT relax threshold)"
   exit 1
 fi
 ```
@@ -307,6 +343,8 @@ fi
 chmod +x scripts/poc-bench.sh
 ./scripts/poc-bench.sh        # → AC2 PASS 기대
 ```
+
+> *(왜 측정 범위 분리)* 원래 스크립트는 외부 `time.time()*1000`로 Python 인터프리터 부팅(~80–150 ms) + 사전 .docx 300개 생성까지 포함한다. 그러면 실제 rename/write가 500 ms여도 wall-clock이 800–1100 ms로 측정되어 경계값에서 AC2가 randomly 실패한다. `simulate.py` 내부 `perf_counter` 구간만 신뢰한다.
 
 ### 6.2 [Day 2, 3h] PoC v2 + v3 variants
 `poc-samples/ransomware_simulator/v2/simulate.py`: v1과 동일 패턴, `.txt → .crypted`, 500 files/0.8s.
@@ -318,6 +356,10 @@ v2/v3 작성 가이드: 5.1 코드에서 다음 3개만 변경.
 - prefix write 바이트 수 (선택)
 
 > 🚫 **v3는 절대 학습 데이터에 포함되지 않게 디렉토리 격리**: `datasets/positive/` 안에 v3 로그를 절대 두지 않는다. v3 출력은 `datasets/heldout/v3/`로.
+
+> *(개념)* **held-out set**은 학습 과정에서 모델이 한 번도 보지 못한 평가 전용 데이터. test set과 비슷하지만 일반적으로 분포 자체를 다르게 잡아 "학습 분포 밖" 일반화를 검증한다.
+>
+> *(Why v3만 held-out)* v1(`.docx→.docx.enc`)·v2(`.txt→.crypted`)로 학습한 모델이 **본 적 없는 확장자 변형**(`.pdf→.locked`)에서도 ransomware로 분류하는지가 핵심. 단순 확장자 매칭이 아니라 "행위 윈도우 통계" 자체를 학습했음을 증명하는 단일 가장 강력한 근거이며, AC5a 평가의 정당성 기둥이다.
 
 ### 6.3 [Day 3, 3h] Positive 데이터셋 생성기
 `scripts/gen-positive.py` (또는 inline shell):
@@ -341,6 +383,8 @@ def emit(events, out_path):
 - `datasets/positive/v2_run_{01..10}.jsonl`
 - `datasets/heldout/v3/v3_run_{01..10}.jsonl`
 
+> *(노하우)* JSONL은 **1줄 = 완전한 JSON 객체 1개**가 절대 규칙. 줄바꿈을 객체 내부에 넣으면 line-by-line streaming 파서가 깨진다. `json.dumps(e, ensure_ascii=False)`로 emit 시 마지막에 명시적으로 `+ "\n"`을 붙이고, 읽는 쪽은 `for line in open(...)` 패턴으로 처리해 메모리에 전체 파일을 올리지 않는다. AC5 평가 스크립트의 `jq -s '.'`도 이 가정을 깔고 있다.
+
 ### 6.4 [Day 4, 3h] AC5b Negative 데이터셋 (bursty-benign)
 ```bash
 mkdir -p datasets/negative
@@ -351,6 +395,8 @@ robocopy "C:\src" "C:\dst" /MIR /LOG:datasets/negative/robocopy_run_01.log
 7z x sample.zip -o"./tmp_extract" > datasets/negative/7zip_run_01.log
 ```
 → negative 샘플 ≥10개 확보. 합성 PoC와 동일한 JSONL 포맷으로 변환하는 `scripts/log-to-events.py` 작성.
+
+> *(Why robocopy /MIR + 7zip)* 둘 다 짧은 시간에 **고밀도 FileWrite/FileRename** burst를 일으키는 대표적 정상 워크로드다. `write_rate`만 보는 모델은 robocopy를 ransomware로 오탐할 가능성이 가장 크고, 이 두 케이스에서 FP≤1/10을 통과해야 모델이 단순 임계치가 아니라 다변수 분류기임이 증명된다. AC5b의 의도가 바로 "정상 burst와 악성 burst의 구분력" 측정.
 
 ### 6.5 [Day 5-6, 6h] `features.py` 본구현
 `python-engine/features.py`:
@@ -394,44 +440,69 @@ def _zero_vector():
             ("write_rate","rename_rate","ext_diversity","size_mean","size_std","pid_fanout")}
 ```
 
+> *(Why ext_diversity + pid_fanout)* 두 피처가 robocopy/7zip(정상 burst)과 ransomware burst를 가르는 결정적 축이다.
+> - `ext_diversity`: robocopy는 보통 한두 가지 확장자 디렉토리를 미러링 — 낮은 다양성. ransomware는 무차별 다파일 암호화 → 높은 다양성.
+> - `pid_fanout`: 정상 도구는 메인 PID + 자식 워커 소수. ransomware는 자식 분기·스레드 폭이 더 넓거나, 반대로 단일 PID에서 폭주적 IO를 한다 — 둘 다 정상 분포에서 이탈 신호.
+> 이 두 피처가 없으면 `write_rate` 단독 모델로 회귀해 AC5b FP를 통과하지 못한다.
+
 ### 6.6 [Day 7, 3h] 모델 학습 + `/classify` 본구현
 의사 코드 (구체 알고리즘은 본인 선택; logistic regression 또는 RandomForest 권장 — 학습 빠르고 p99 budget 여유).
 
+> *(Why LogisticRegression)* 딥러닝이 아닌 LR을 채택하는 이유는 **추론 지연이 결정적으로 작고 예측 가능**하기 때문이다. AC4의 `/classify p99<100ms`는 절대 양보 불가 조건이고, LR은 feature dot product 한 번이라 상시 sub-ms. 학습도 수십~수백 샘플에서 즉시 수렴해 Week 6-7의 22h 단일 블록 안에 반복 튜닝이 가능하다. 정확도 향상이 필요하면 RandomForest(여전히 ms 단위)로만 점프하고 신경망까지는 가지 않는다.
+
 `python-engine/model/train.py`:
 ```python
-"""v1+v2 학습, v3+negatives는 평가용으로 분리."""
-import json, glob, pickle
+"""v1+v2 학습, v3+negatives는 평가용으로 분리.
+실행: repo root에서 `python python-engine/model/train.py`
+"""
+import json, glob, pickle, sys
+from pathlib import Path
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from features import extract
+
+# 경로 anchoring: train.py 위치 기준으로 engine 디렉토리/repo root 산출
+ENGINE_DIR = Path(__file__).resolve().parent.parent   # python-engine/
+ROOT = ENGINE_DIR.parent                              # repo root
+sys.path.insert(0, str(ENGINE_DIR))                   # features.py import 보장
+
+from features import extract  # noqa: E402
 
 WINDOW_MS = 1000
 X, y = [], []
 
-for path in glob.glob("datasets/positive/v[12]_*.jsonl"):
+for path in sorted(glob.glob(str(ROOT / "datasets" / "positive" / "v[12]_*.jsonl"))):
     events = [json.loads(l) for l in open(path)]
     X.append(list(extract(events, WINDOW_MS).values()))
     y.append(1)
 
-for path in glob.glob("datasets/negative/*.jsonl"):
+for path in sorted(glob.glob(str(ROOT / "datasets" / "negative" / "*.jsonl"))):
     events = [json.loads(l) for l in open(path)]
     X.append(list(extract(events, WINDOW_MS).values()))
     y.append(0)
 
+if not X:
+    sys.exit("ERR: no training samples found — datasets/positive 또는 datasets/negative가 비었음")
+
 clf = LogisticRegression(max_iter=1000).fit(np.array(X), np.array(y))
-with open("python-engine/model/model.pkl", "wb") as f:
+MODEL_PATH = ENGINE_DIR / "model" / "model.pkl"
+MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+with open(MODEL_PATH, "wb") as f:
     pickle.dump(clf, f)
-print("trained, n_samples =", len(y))
+print(f"trained, n_samples={len(y)}, saved={MODEL_PATH}")
 ```
 
-`app.py`의 `/classify`를 모델 + fallback 라우팅으로 교체:
+`app.py`의 `/classify`를 모델 + fallback 라우팅으로 교체. 모델 경로는 **CWD에 의존하지 않게 `__file__` 기준 anchor**:
 ```python
 import pickle, time
+from pathlib import Path
 from features import extract
 from fallback_rules import classify_events as rule_classify
 
+ENGINE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = ENGINE_DIR / "model" / "model.pkl"
+
 try:
-    with open("python-engine/model/model.pkl", "rb") as f:
+    with open(MODEL_PATH, "rb") as f:
         _MODEL = pickle.load(f)
     MODEL_VERSION = "lr-2026w7"
 except FileNotFoundError:
@@ -448,7 +519,7 @@ def classify():
         return jsonify(**rule_classify(events, window_ms)), 200
 
     feats = list(extract(events, window_ms).values())
-    proba = float(_MODEL.predict_proba([feats])[0][1])
+    proba = float(_MODEL.predict_proba([feats])[0][1])  # [0]=첫 샘플, [1]=positive(ransomware) 확률
     verdict = "ransomware" if proba >= 0.5 else "benign"
     return jsonify(
         verdict=verdict,
@@ -458,23 +529,44 @@ def classify():
     ), 200
 ```
 
+> *(노하우)* `predict_proba`는 `(n_samples, n_classes)` 형태 ndarray를 반환한다. 클래스 인덱스 순서는 `_MODEL.classes_`로 결정되며, 위 학습 코드에서 y∈{0,1}을 그대로 fit했으므로 `[0]=benign, [1]=ransomware` 확률이다. `_MODEL.classes_ == array([0, 1])`임을 학습 직후 확인할 것 — 클래스 라벨링이 바뀌면 `[0][1]` 인덱싱이 침묵 실패한다.
+>
+> *(참조)* `max_iter`, `class_weight`("balanced"가 negative 부족 시 도움), `C`(정규화 강도) 하이퍼파라미터는 scikit-learn 공식 문서의 *LogisticRegression* API를 참조.
+
 ### 6.7 [Day 7, 1h] /classify p99 < 100ms 자체 측정
+
+**선행**: 측정 전에 서버가 떠 있어야 한다. 떠 있지 않으면 `requests.exceptions.ConnectionError`로 실패.
 ```bash
-# 간단 부하: 100회 요청 후 정렬 99번째
+cd python-engine && source .venv/Scripts/activate
+python waitress_conf.py &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+sleep 1
+curl -fsS http://127.0.0.1:8765/health > /dev/null   # 살아있나 확인
+cd ..
+```
+
+```bash
+# 부하: 100회 요청, nearest-rank p99 = ceil(0.99*N)-1 인덱스
 python - <<'PY'
-import time, requests, json, statistics
+import math, time, requests
 payload = {"events": [{"event_type":"FileWrite","ts_unix_ms":i} for i in range(300)], "window_ms": 1000}
 lat = []
 for _ in range(100):
     t0 = time.perf_counter()
     r = requests.post("http://127.0.0.1:8765/classify", json=payload, timeout=2)
-    lat.append((time.perf_counter()-t0)*1000)
+    r.raise_for_status()
+    lat.append((time.perf_counter() - t0) * 1000)
 lat.sort()
-print(f"p50={lat[50]:.1f}ms  p99={lat[99]:.1f}ms")
+p50 = lat[math.ceil(0.50 * len(lat)) - 1]
+p99 = lat[math.ceil(0.99 * len(lat)) - 1]   # N=100 → 인덱스 98 (lat[99]는 최댓값=p100)
+print(f"p50={p50:.1f}ms  p99={p99:.1f}ms")
 PY
 ```
 - **p99 < 100ms PASS** → 그대로 진행.
 - **p99 >= 100ms FAIL** → 즉시 `_MODEL = None` (또는 `VELXOR_STUB=engine`) 영속 + `MODEL_VERSION="rule-based-v1"` 표시. **임계값 완화 금지**.
+
+> *(왜 ceil-1)* nearest-rank percentile 정의상 N=100 샘플의 p99는 99번째로 큰 값 = 정렬 후 인덱스 98. 원래 코드 `lat[99]`는 100번째 = 최댓값(p100)이라 늘 진짜 p99보다 낙관적이거나(거의 같음) tail outlier 1개에 휘둘려 비교 불가능했다.
 
 ### 6.8 커밋 마일스톤
 ```bash
@@ -498,20 +590,28 @@ git push --tags
 #!/usr/bin/env bash
 # AC5: held-out v3 10개 + negative 10개 → TP >= 9/10, FP <= 1/10
 set -euo pipefail
+shopt -s nullglob          # 매칭 없으면 빈 배열 (literal 패턴이 jq로 흘러가는 사고 차단)
 
 ENGINE=http://127.0.0.1:8765/classify
 TP=0; FP=0; FN=0; TN=0
 
-for f in datasets/heldout/v3/*.jsonl; do
+heldout=(datasets/heldout/v3/*.jsonl)
+negatives=(datasets/negative/*.jsonl)
+if [ "${#heldout[@]}" -eq 0 ] || [ "${#negatives[@]}" -eq 0 ]; then
+  echo "ERR: held-out 또는 negative JSONL이 비어있음 — Week 6.3/6.4 산출물 확인" >&2
+  exit 2
+fi
+
+for f in "${heldout[@]}"; do
   EVENTS=$(jq -s '.' "$f")
-  V=$(curl -s -X POST "$ENGINE" -H "Content-Type: application/json" \
+  V=$(curl -fsS -X POST "$ENGINE" -H "Content-Type: application/json" \
         -d "{\"events\":${EVENTS},\"window_ms\":2000}" | jq -r .verdict)
   [ "$V" = "ransomware" ] && TP=$((TP+1)) || FN=$((FN+1))
 done
 
-for f in datasets/negative/*.jsonl; do
+for f in "${negatives[@]}"; do
   EVENTS=$(jq -s '.' "$f")
-  V=$(curl -s -X POST "$ENGINE" -H "Content-Type: application/json" \
+  V=$(curl -fsS -X POST "$ENGINE" -H "Content-Type: application/json" \
         -d "{\"events\":${EVENTS},\"window_ms\":2000}" | jq -r .verdict)
   [ "$V" = "ransomware" ] && FP=$((FP+1)) || TN=$((TN+1))
 done
@@ -521,8 +621,13 @@ echo "TP=$TP FN=$FN  FP=$FP TN=$TN"
 echo "AC5 FAIL (do NOT relax thresholds — record as-is per AC5 policy)"; exit 1
 ```
 
+> *(개념)* **TP**(True Positive) = 실제 랜섬웨어를 ransomware로 맞춘 수. **FP**(False Positive) = 정상 행위를 ransomware로 오탐한 수. **Honest reporting**은 임계값(0.5)·feature 가중치·평가 데이터를 **결과를 맞추려 사후 조정하지 않고** 측정한 그대로 보고하는 원칙. AC5의 신뢰도 전체가 이 원칙에 매여 있어 한 번 조정이 발각되면 평가 자체가 무효가 된다.
+>
+> *(왜 jq `-s`)* JSONL 파일을 `-s`(slurp)로 읽으면 줄별 객체를 단일 배열로 묶어 `/classify`의 `events[]` 필드 형식과 호환된다. `[줄1, 줄2, ...]`가 그대로 events 배열이 됨 — 6.3의 "1줄=1이벤트" 가정과 짝지어진다.
+
 ### 7.2 `docs/AC5-results.md` 작성
 ```bash
+set -o pipefail   # eval-ac5.sh 실패가 tee 성공에 가려지지 않도록
 mkdir -p docs
 ./scripts/eval-ac5.sh | tee /tmp/ac5.out
 cat > docs/AC5-results.md <<EOF
@@ -562,21 +667,28 @@ set -euo pipefail
 LOG="${1:-rust-service/logs/trace.json}"
 
 python - "$LOG" <<'PY'
-import json, sys, statistics
+import json, math, sys
 path = sys.argv[1]
 e2w, classify = [], []
 with open(path) as f:
     for line in f:
         try: r = json.loads(line)
-        except: continue
+        except Exception: continue
         if "event_received_ts" in r and "ws_sent_ts" in r:
             e2w.append(r["ws_sent_ts"] - r["event_received_ts"])
         if "classify_start_ts" in r and "classify_end_ts" in r:
             classify.append(r["classify_end_ts"] - r["classify_start_ts"])
 
-def p99(xs): xs = sorted(xs); return xs[int(len(xs)*0.99) - 1] if xs else float("nan")
-print(f"event→ws  p99 = {p99(e2w):.1f} ms  (target < 1000 ms)")
-print(f"classify  p99 = {p99(classify):.1f} ms  (target < 100 ms)")
+def p99(xs):
+    if not xs:
+        return float("nan")
+    xs = sorted(xs)
+    # nearest-rank percentile: ceil(0.99*N)-1, clip to [0, N-1]
+    idx = min(math.ceil(0.99 * len(xs)) - 1, len(xs) - 1)
+    return xs[max(idx, 0)]
+
+print(f"event→ws  p99 = {p99(e2w):.1f} ms  (target < 1000 ms, n={len(e2w)})")
+print(f"classify  p99 = {p99(classify):.1f} ms  (target < 100 ms,  n={len(classify)})")
 PY
 ```
 
@@ -588,12 +700,22 @@ git add scripts/eval-ac4.sh && git commit -m "C: week8-9 AC4 eval script (tracin
 
 ### 7.4 AC8 stub smoke (C 담당 = engine 모드)
 ```bash
-VELXOR_STUB=engine python -m waitress_conf &
+# waitress_conf는 python-engine/ 안에 있으므로 cd 후 실행해야 모듈 발견됨
+cd python-engine
+VELXOR_STUB=engine python waitress_conf.py &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
 sleep 1
-curl -s http://127.0.0.1:8765/health | jq .              # model_version=rule-based-v1 또는 stub-v1
-curl -s -X POST http://127.0.0.1:8765/classify -d '{}' -H 'Content-Type: application/json' | jq .
+
+curl -fsS http://127.0.0.1:8765/health | jq .              # model_version=stub-v1 (또는 rule-based-v1)
+curl -fsS -X POST http://127.0.0.1:8765/classify \
+     -H 'Content-Type: application/json' \
+     -d '{"events":[],"window_ms":1000}' | jq .
 # → 항상 200 + verdict 채워짐. 미달 시 fix.
+cd ..
 ```
+
+> *(Why empty 본문 대신 명시 events)* Flask `request.get_json(silent=True)`는 빈 본문을 `None`으로 돌리지만, 일부 가드가 본문 부재 시 422를 던지도록 미래에 강화될 수 있다. AC8은 "engine이 단독으로 살아있다"는 증명이라 의도된 minimal valid payload로 stress한다.
 
 ### 7.5 리허설 3회 참여
 B 주관. C는 `REHEARSAL-LOG.md`에 자기 섹션(엔진 응답 시간, fallback 동작 여부) 기록.
@@ -610,6 +732,8 @@ B 주관. C는 `REHEARSAL-LOG.md`에 자기 섹션(엔진 응답 시간, fallbac
 - robocopy/7zip negative 워크로드 라벨
 - `docs/AC5-results.md` 표 그대로 캡처
 - **AC5c disclaimer 굵게**: *"Evaluated on synthetic PoC, not real-world malware. Real-world testing is future work."*
+
+> *(체크리스트)* AC5c disclaimer는 슬라이드 1곳만 두면 Q&A에서 캡처/공유 시 떨어져 나간다. **`README.md` 최상단, `docs/AC5-results.md` 본문, 발표 슬라이드, 데모 영상 자막**까지 동일 문구로 박아두면 어디서 잘려나가도 한 곳은 살아남는다.
 
 ### 8.2 (선택) 백업 시연 영상 — Deferral #4
 시간 부족 시 **이게 가장 먼저 잘리는 항목**. 본 데모가 라이브로 잘 돌면 skip.
