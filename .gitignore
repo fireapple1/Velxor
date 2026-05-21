@@ -29,3 +29,9 @@ out/
 
 CLAUDE.md
 .claude
+
+
+# Added by cargo
+
+/target
+events.jsonl
