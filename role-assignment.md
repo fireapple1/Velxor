@@ -1,10 +1,10 @@
 # Velxor 팀 Zeraxis — 역할 분담 (공동 작업자 3인)
 
 ## Metadata
-- **기술 명세 출처 (Source of truth)**: `.omc/plans/velxor-consensus-plan.md`
-- **형식 참고**: `Velxor/velxor_planning_doc.html` (3인 카드 + 4계층 layer-card 레이아웃만)
+- **기술 명세 출처 (Source of truth)**: [`velxor-consensus-plan.md`](./velxor-consensus-plan.md) (참고: `.omc/`는 session-local, `.gitignore` 처리됨)
+- **형식 참고**: [`velxor_planning_doc.html`](./velxor_planning_doc.html) (3인 카드 + 4계층 layer-card 레이아웃만)
 - **Generated**: 2026-05-20
-- **Mode**: 3인 공동 작업자 균등 분담 (각 ~40h, 합계 ≤120h)
+- **Mode**: 3인 공동 작업자 균등 분담 (각 ~40h, 합계 ≤126h, deferral 트리거 >145h)
 
 ---
 
@@ -17,17 +17,17 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 
 ```
 ① 커널 드라이버 (C + WDK)
-       ↓ IOCTL (BehaviorEventV1, FltSendMessage)
+       ↓ Driver→Service 메시지 (BehaviorEventV1, FltMgr comm port via FltSendMessage)
 ② 유저모드 서비스 (Rust)
        ↓ REST POST /classify
-③ 분석 엔진 (Python + Flask + gunicorn 2 workers)
+③ 분석 엔진 (Python + Flask + Waitress, threads=4)
        ↑ verdict { benign|ransomware, confidence, evidence[], model_version }
 ② Rust 서비스
-       ↓ WebSocket (live broadcast + 5초 replay VecDeque)
+       ↓ WebSocket (live broadcast + 5초 replay VecDeque, ?last_seq=N 핸드셰이크)
 ④ UI (TypeScript + React + Electron)
 ```
 
-**1초 wow 모먼트 흐름**: 파일 실행 → 드라이버 감지 → IOCTL 이벤트 → Rust 집계(sliding window + burst detection) → `/classify` 호출 → verdict → WebSocket → UI 빨간 노드 + verdict panel → 자동 차단 또는 Block 버튼.
+**1초 wow 모먼트 흐름**: 파일 실행 → 드라이버 감지 → FltMgr comm port 이벤트(`FltSendMessage`) → Rust 집계(sliding window + burst detection) → `/classify` 호출 → verdict → WebSocket → UI 빨간 노드 + verdict panel → 자동 차단 또는 Block 버튼.
 
 ---
 
@@ -48,10 +48,10 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 ### Owns
 - 미니필터 드라이버 (파일 I/O 가로채기: FileWrite, FileRename)
 - 프로세스 생성 콜백 (`PsSetCreateProcessNotifyRoutine`)
-- IOCTL 송신측 (`FltSendMessage`, 비차단 수신 thread, 큐 깊이 1024, `dropped_since_last`)
-- Rust `driver_source.rs` (events.jsonl ↔ IOCTL 어댑터, `VELXOR_STUB=driver` 분기)
+- Driver→Service 메시지 송신측 (FltMgr **comm port** via `FltSendMessage`, Timeout=10ms 비차단, 큐 깊이 1024, `dropped_since_last`, lock-held/DPC/APC 송신 금지)
+- Rust `driver_source.rs` (events.jsonl ↔ FltMgr comm port 어댑터, `VELXOR_STUB=driver` 분기)
 - Rust `aggregator.rs` (PID별 sliding window 1s/5s, burst detection)
-- 자동 차단 `TerminateProcess(pid)`
+- 자동 차단 (`OpenProcess(PROCESS_TERMINATE, false, pid)` → `TerminateProcess(handle, 1)` → `CloseHandle(handle)`)
 - BSOD 핸들링 / VM snapshot rollback
 
 ### Week 0 (~7h)
@@ -61,7 +61,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 
 ### Week 1 (~5h)
 - 1.2(부분) 드라이버 stub: `events.jsonl` writer (mock 이벤트 emit)
-- Rust `driver_source.rs`: `events.jsonl` poll ↔ 실IOCTL 어댑터 분기 (`VELXOR_STUB` flag)
+- Rust `driver_source.rs`: `events.jsonl` poll ↔ 실 FltMgr comm port 어댑터 분기 (`VELXOR_STUB` flag)
 - 1.6 schema v1-draft mechanical ack (컴파일 가능 한 줄 응답)
 
 ### Week 3 (~1h)
@@ -70,13 +70,13 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 ### Week 4-5 (~18h)
 - 미니필터 드라이버 본구현 (FileWrite, FileRename)
 - `PsSetCreateProcessNotifyRoutine` 콜백
-- IOCTL `BehaviorEventV1` 송신: `FltSendMessage`, 큐 깊이 1024, `dropped_since_last` 카운트
+- FltMgr comm port `BehaviorEventV1` 송신: `FltSendMessage` Timeout=10ms, 큐 깊이 1024, `dropped_since_last` 카운트. lock 보유/DPC/APC context 송신 금지 → worker thread dispatch
 - 4.1 Rust sliding window per PID (1s / 5s)
 - 4.2 burst detection (FileWrite ≥ 50/1s OR FileRename ≥ 30/1s)
-- **4.5 통합 포인트**: B의 Rust 서비스 어댑터를 실IOCTL로 교체. 미도착 시 `VELXOR_STUB=driver` 영속, 진행 차단 없음
+- **4.5 통합 포인트**: B의 Rust 서비스 어댑터를 실 FltMgr comm port로 교체. 미도착 시 `VELXOR_STUB=driver` 영속, 진행 차단 없음
 
 ### Week 8-9 (~8h)
-- 8.1 자동 차단 — `TerminateProcess(pid)` 구현 (Deferral #3 후보)
+- 8.1 자동 차단 — Rust에서 `OpenProcess(PROCESS_TERMINATE, false, pid)` → `TerminateProcess(handle, 1)` → `CloseHandle(handle)` 시퀀스 구현. handle open 실패/terminate 실패 시 fallback 로그 (Deferral #3 후보)
 - `scripts/ac6-verify-block.sh` — `tasklist /fi "pid eq <PID>"` 빈 결과 자동 확인
 - 리허설 3회 driver 안정성, BSOD 발생 시 snapshot rollback (< 60s)
 - 1회 이상 BSOD 시 즉시 `VELXOR_STUB=driver` 데모 모드 전환
@@ -90,11 +90,11 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 ## B — Rust 통합 서비스 & UI & Interface Contract (~40h)
 
 ### Owns
-- Interface Contract v1-draft / v1.1 (`contracts/interface-schema.md`)
-- Rust `classifier_client.rs` (REST 클라이언트)
-- Rust `ws_broadcaster.rs` (tokio broadcast = live fan-out + 별도 `VecDeque` lock-protected 5초 replay)
-- React + Electron UI 전체 (ProcessTree, Timeline, DetailPanel, Block 버튼)
-- WS 클라이언트 (exponential backoff)
+- Interface Contract v1-draft / v1.1 (`contracts/interface-schema.md`) — wire encoding, reconnect 핸드셰이크 포함
+- Rust `classifier_client.rs` (REST 클라이언트, 대상 = Waitress)
+- Rust `ws_broadcaster.rs` (tokio broadcast = live fan-out + 별도 `VecDeque` lock-protected 5초 replay, `?last_seq=N` 핸드셰이크)
+- React + Electron UI 전체 (ProcessTree, Timeline, DetailPanel, Block 버튼) — UI는 `seq` 기반 dedupe
+- WS 클라이언트 (exponential backoff, `last_seq` 기록 후 reconnect 시 query param 전달)
 - `run-all.sh`, `ws-record.sh`
 - `DEMO-SCRIPT.md`, `electron-ws-footgun.md`
 
@@ -104,9 +104,11 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 
 ### Week 1 (~12h)
 - **1.1 Interface Contract v1-draft** → `Velxor/contracts/interface-schema.md`
-  - IOCTL `BehaviorEventV1` (`schema_version`, `seq`, `dropped_since_last`, `pid`, `parent_pid`, `image_path`, `event_type`, `file_path?`, `volume_id?`, `op_detail?`, `ts_unix_ms`)
-  - REST `POST /classify` (`req.events[]`, `req.window_ms`, `resp.verdict`, `resp.confidence`, `resp.evidence[]`, `resp.model_version`)
-  - WS message (`schema_version`, `seq`, `type` ∈ {node_add|node_update|verdict|alert}, `payload`)
+  - Driver→Service 메시지 `BehaviorEventV1` (FltMgr comm port, `schema_version`, `seq`, `dropped_since_last`, `pid`, `parent_pid`, `image_path`, `event_type`, `file_path?`, `volume_id?`, `op_detail?`, `ts_unix_ms`)
+  - **Wire encoding**: JSON UTF-8, max 4 KiB/msg; `image_path`/`file_path`는 UTF-16LE NUL-terminated 최대 520 bytes (MAX_PATH 대응)
+  - REST `POST /classify` (Waitress 호스팅; `req.events[]`, `req.window_ms`, `resp.verdict`, `resp.confidence`, `resp.evidence[]`, `resp.model_version`)
+  - WS message (`schema_version`, `seq`, `type` ∈ {node_add|node_update|verdict|alert|gap}, `payload`)
+  - **Reconnect 프로토콜**: client 연결 시 `?last_seq=N` 전달, server는 seq>N replay 후 live; VecDeque 5초 초과로 N+1 부재 시 `{type:"gap", from, to}` → UI 트리 재구성; UI는 동일 seq 중복 무시
   - Evolution policy (v1.x additive only, v2 breaking, `*_v2` parallel field escape hatch)
   - `VELXOR_STUB` semantics 표 (driver/engine/both)
 - Rust `ws_broadcaster.rs`: broadcast channel + 별도 `VecDeque` lock-protected replay (>1000 events 가능)
@@ -137,18 +139,18 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 ## C — Python 분석 엔진 & PoC/평가 (~40h)
 
 ### Owns
-- Flask + gunicorn 2 workers REST API (`/classify`, `/health`)
+- Flask + **Waitress** (threads=4, Windows native) REST API (`/classify`, `/health`)
 - `features.py` (행위 윈도우 통계 추출)
 - `fallback_rules.py` (rule-based 영속 백업: write rate ≥ 50/1s → ransomware 0.9)
 - 학습 모델 (`/classify` p99 < 100ms 만족, `model_version` 채움)
 - PoC v1/v2/v3 + 데이터셋 (positive/negative)
-- AC2/AC4/AC5 측정 (`poc-bench.sh`, `eval-ac5.sh`, `AC5-results.md`)
+- AC2/AC4/AC5 측정 (`poc-bench.sh`, `eval-ac4.sh`, `eval-ac5.sh`, `AC5-results.md`)
 
 ### Week 0 (~2h)
-- 0.5 Flask `/health` 200 (venv + Flask + gunicorn)
+- 0.5 Flask `/health` 200 (venv + Flask + **Waitress** threads=4)
 
 ### Week 1 (~5h)
-- 1.3 Python engine stub: Flask + gunicorn 2 workers, 하드코드 verdict `{ransomware, 0.95}` (`VELXOR_STUB=engine` 모드)
+- 1.3 Python engine stub: Flask + Waitress threads=4, 하드코드 verdict `{ransomware, 0.95}` (`VELXOR_STUB=engine` 모드)
 - `fallback_rules.py` 골격 (write rate ≥ 50/1s → ransomware 0.9)
 - 1.6 schema v1-draft ack
 
@@ -163,7 +165,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 - 6.3 positive 데이터셋 생성기 (v1+v2 학습, v3 held-out)
 - **6.4 AC5b bursty-benign**: `robocopy /MIR src dst`, 7zip 압축해제 → negative 로그
 - `features.py`: 행위 윈도우 통계 (write rate, rename rate, 확장자 다양성, 파일 크기 분포, PID 트리 fan-out)
-- 학습 모델 트레이닝 → `/classify` p99 < 100ms 만족 (gunicorn 2 workers)
+- 학습 모델 트레이닝 → `/classify` p99 < 100ms 만족 (Waitress threads=4)
 - 미달성 시 `fallback_rules.py` 영속, `model_version: "rule-based-v1"`
 - `scripts/poc-bench.sh` (AC2: 300 file ops wall-clock < 1s 검증)
 
@@ -171,7 +173,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 - **8.4 AC5 측정**: `scripts/eval-ac5.sh` 작성
   - v1+v2 학습, v3 held-out + robocopy/7zip negative로 평가
   - `docs/AC5-results.md` 산출 (≥9/10 TP, ≤1/10 FP)
-- AC4 측정 스크립트: Rust `tracing` JSON 파싱 → event→ws p99 < 1000ms, classify p99 < 100ms 출력
+- **AC4 측정**: `scripts/eval-ac4.sh` — Rust `tracing` JSON 파싱 → event→ws p99 < 1000ms, classify p99 < 100ms 출력
 - 임계값 완화 X, honest reporting (held-out v3 결과 그대로 슬라이드)
 
 ### Week 10 (~2h)
@@ -197,7 +199,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 
 | 통합 포인트 | 시점 | Primary owner | Fallback |
 |---|---|---|---|
-| ① → ② IOCTL (Driver → Rust) | Week 4-5 | A | `VELXOR_STUB=driver` (events.jsonl poll 영속) |
+| ① → ② Driver→Service 메시지 (FltMgr comm port, `FltSendMessage`) | Week 4-5 | A | `VELXOR_STUB=driver` (events.jsonl poll 영속) |
 | ② → ③ REST `/classify` (Rust → Python) | Week 1 (stub) / Week 7 (real) | B + C | `VELXOR_STUB=engine` 또는 `fallback_rules.py` (`model_version: "rule-based-v1"`) |
 | ② → ④ WebSocket (Rust → UI) | Week 1 | B | (단일 owner, fallback 불필요) |
 | Schema v1 / v1.1 | Week 1 / Week 3 | B (주관) | 48h 무응답 시 B 단독 발행 (Principle 4) |
@@ -207,7 +209,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 
 ---
 
-## Hour Ledger (3인 합산 ≤120h, deferral 트리거 >138h)
+## Hour Ledger (3인 합산 ≤126h, deferral 트리거 >145h)
 
 | Week | A | B | C | 합계 | 비고 |
 |---|---|---|---|---|---|
@@ -218,11 +220,11 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 | Week 6-7 (PoC + 데이터셋) | 0 | 0 | 22 | 22 | AC5a/b |
 | Week 8-9 (통합 + 차단 + 측정) | 8 | 5 | 8 | 21 | AC5 측정 |
 | Week 10 (발표) | 2 | 3 | 2 | 7 | 슬라이드 + 리허설 |
-| **Total** | **~41h** | **~45h** | **~40h** | **~126h** | ceiling 120h 대비 +5%, deferral 트리거 138h(120×1.15)에 미달 → 자동 절단 불필요 |
+| **Total** | **~41h** | **~45h** | **~40h** | **~126h** | ceiling 126h에 부합, deferral 트리거 145h(126×1.15)에 미달 → 자동 절단 불필요. (원 spec 120h ceiling 대비 +5% 공식 조정) |
 
 > B가 ~5h 더 많은 이유: Interface Contract 주관 + UI 풀스택 책임. Week 2-3에 집중되므로 다른 주에서 흡수 가능.
 
-### Deferral Order (사전 정의, >138h 시 자동 적용)
+### Deferral Order (사전 정의, >145h 시 자동 적용)
 1. 2.4 UI 사운드 효과 (Web Audio) → B
 2. 2.2 Threat Timeline (D3) → 간단 리스트 뷰 → B
 3. 8.1 자동 차단 → Block 버튼 수동 차단만 → A
@@ -237,7 +239,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 | AC1 Walking Skeleton | `run-all.sh` exit 0, `ws-record.sh` 캡처에 `node_add{event_type:"FileWrite"}`, 3인 재현, `walking-skeleton-v1` tag | B (스크립트), 전원 (재현) |
 | AC2 PoC 동작 | `poc-bench.sh` wall-clock < 1s for 300 ops | C |
 | AC3 탐지 화면 | OBS 영상 + `docs/AC3-evidence/frame-1000ms.png` 빨간 노드 + verdict panel | B |
-| AC4 지연시간 | event→ws p99 < 1000ms, classify p99 < 100ms (gunicorn 2 workers sub-budget) | B (tracing) + C (측정 스크립트) |
+| AC4 지연시간 | event→ws p99 < 1000ms (측정), 데모 wall-clock ≤ 1s (체감); classify p99 < 100ms (Waitress threads=4 sub-budget); `scripts/eval-ac4.sh` 산출 | B (tracing instrumentation) + C (측정 스크립트) |
 | AC5 분류 정확도 (≥9/10 TP, ≤1/10 FP) | `eval-ac5.sh`, `AC5-results.md` | C |
 | AC5a held-out v3 | `poc-samples/v3/` (.pdf → .locked) | C |
 | AC5b bursty-benign negative | robocopy/7zip 로그 | C |
@@ -258,7 +260,7 @@ Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신. 4계층(C
 | Driver crash → BSOD | Low | High | 리허설 중 BSOD 1회 이상 | VM snapshot rollback (<60s); 1회 BSOD 시 `VELXOR_STUB=driver` 데모 모드 | A |
 | WS reconnect 불안정 | Medium | Low | 리허설 중 끊김 관측 | Rust 5초 replay (separate VecDeque) + UI exponential backoff + Electron dev 핫리로드 disable | B |
 | 합성 PoC 일반화 의문 | Medium | Low | 발표 Q&A | AC5c slide note + "real-world testing future work" | C |
-| 시간 예산 ≥115% 초과 (>138h) | High | Medium | 누적 hours > 138 | 사전 정의 deferral order 자동 적용 | 전원 |
+| 시간 예산 ≥115% 초과 (>145h) | High | Medium | 누적 hours > 145 | 사전 정의 deferral order 자동 적용 | 전원 |
 | Week 0+1 부하 집중 (~21-23h) | High | Medium | 학기 전 주말 + Week 1 | Week 0를 학기 시작 ≥1주 전 완료 | A + B |
 | Week 3 review 응답 부진 | Medium | Low | 48h 후 노트 0건 | v1.1 B 단독 발행 (Principle 4 의도된 trade) | B |
 | v1.0 필드 잘못 타입 결정 | Low | Medium | Week 3 review에서 wrong-typed 발견 | additive `*_v2` 필드 추가 + 슬라이드 deprecated (escape hatch) | B |
@@ -281,7 +283,7 @@ Velxor/
 │       └── ws_broadcaster.rs                # B
 ├── python-engine/
 │   ├── app.py                               # C
-│   ├── gunicorn_conf.py                     # C
+│   ├── waitress_conf.py                     # C — Waitress threads=4 (Windows native WSGI)
 │   ├── features.py                          # C
 │   ├── fallback_rules.py                    # C
 │   ├── requirements.txt                     # C
@@ -300,6 +302,7 @@ Velxor/
 │   ├── run-all.sh                           # B
 │   ├── ws-record.sh                         # B
 │   ├── poc-bench.sh                         # C
+│   ├── eval-ac4.sh                          # C (tracing JSON → p99 출력)
 │   ├── eval-ac5.sh                          # C
 │   └── ac6-verify-block.sh                  # A
 └── docs/
@@ -322,16 +325,23 @@ Velxor/
 | UI | "본인" 단독 | B 단독 (계층 1개 집중) |
 | Interface Contract | "본인" 단독 발행 | B 주관, A/C 동등 review input |
 | v1.1 async 48h | "본인" 무응답 시 단독 발행 | B 무응답 시 단독 발행 |
-| Hour 합계 | ~116-124h | ~126h (deferral 트리거 138h에 미달) |
+| Hour 합계 | ~116-124h (ceiling 120h) | ~126h (ceiling 126h 공식 조정, deferral 트리거 145h에 미달) |
 
 > 본 분담은 consensus-plan의 모든 기술 명세(Interface Contract, AC1-AC8, VELXOR_STUB, Walking Skeleton, Interface Evolution Gate, Stub Retention Gate, 합성 PoC 정책, `fallback_rules.py`, AC5a/b/c, 4-item Deferral Order, Risk Table)를 그대로 유지하며, 역할만 3인 균등 분담으로 재배치한다.
+
+---
+
+## Branch Strategy
+
+- `main` — protected, 발표용 안정 브랜치. PR target.
+- `devA` / `devB` / `devC` — 작업자 A/B/C 개별 작업 브랜치 (A→devA, B→devB, C→devC). 본인 owns 영역의 모든 PR은 자기 dev 브랜치에서 main으로.
+- `dev1` / `dev2` / `dev3` — 레거시 (Initial commit 직후 생성), **신규 사용 중단**. 기존 PR 머지 후 정리 권장.
+- Walking Skeleton 완성 시점 `walking-skeleton-v1` tag (AC1). 이후 `v1.1-schema`, `ac5-baseline` 같은 의미 단위 tag.
+- 모든 main 머지는 3인 review 통과 필수 (CODEOWNERS 도입 권장 — `rust-service/` → @B/@A, `python-engine/` → @C, `kernel-driver/` → @A).
 
 ---
 
 ## Status
 - **계획 단계**: 🟡 PENDING APPROVAL
 - **다음 단계**: 사용자 명시적 승인 후 Week 0 시작
-- **승인 시 권장 실행 모드** (consensus-plan Status 섹션 그대로):
-  - `Skill("oh-my-claudecode:ralph")` — 반복 큰 Rust/UI 작업에 적합
-  - `Skill("oh-my-claudecode:team")` — 계층별 agent 1:1 매핑 가능
-  - `Skill("oh-my-claudecode:autopilot")` — consensus 정제 거친 후 자율성 낮춰 실행
+- **승인 시 실행**: 별도 협의 (반복 작업 자동화/병렬 agent 활용 등 도구 선택은 승인 후 결정)
