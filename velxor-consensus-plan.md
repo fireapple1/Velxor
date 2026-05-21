@@ -342,7 +342,7 @@ Velxor/
   (8) `VELXOR_STUB=driver` → `VELXOR_STUB=collector` 일괄 rename
   (9) Waitress 명세 "Windows native WSGI" → "cross-platform" (gunicorn 대체 이유는 측정 재현성으로 재정의)
   (10) BSOD/snapshot rollback → collector crash + `Restart=on-failure`로 대체 (userspace라 시스템 전체 다운 위험 없음)
-  (11) 호스트/Guest OS = Ubuntu 24.04 LTS, Python 3.11은 pyenv 또는 deadsnakes PPA 격리, `.venv/Scripts/activate` → `.venv/bin/activate`
+  (11) 호스트/Guest OS = Ubuntu 24.04 LTS, Python은 **24.04 기본 3.12 그대로 채택** (pyenv/deadsnakes 의존성 제거 — `numpy 1.26.x`·`scikit-learn 1.4.x` 모두 3.12 지원), `.venv/Scripts/activate` → `.venv/bin/activate`
 - **영향**: identity 한 줄(README)이 "Windows 커널 백신" → "Linux 사용자공간 행위 탐지기"로 약화. AC5c disclaimer에 *"Evaluated on Linux/ext4 + fanotify userspace collector; Windows NTFS/minifilter behavior may differ."* 추가. `BehaviorEventV1` JSONL wire 포맷은 보존되어 layer ②/③/④ 코드는 입력 측 어댑터 외 변경 없음.
 - **잠재 follow-up (선택)**: LSM/eBPF 강화 → 정체성 회복(현재는 future work)
 

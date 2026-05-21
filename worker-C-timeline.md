@@ -4,8 +4,8 @@
 > **선행 문서**: [`worker-C-tasks.md`](./worker-C-tasks.md), [`velxor-consensus-plan.md`](./velxor-consensus-plan.md), [`ENVIRONMENT.md`](./ENVIRONMENT.md)
 > **브랜치**: `devC` (모든 PR은 `devC → main`)
 > **OS 가정**: **Ubuntu 24.04 LTS** (bare-metal 또는 VM), native `/usr/bin/bash` 5.2.
->  22.04로 다운그레이드 시 [`ENVIRONMENT.md`](./ENVIRONMENT.md) §2.1 deadsnakes PPA·apt 버전 표 별도 검증.
-> **Python**: 3.11.x (3.11.9 권장) — Ubuntu 24.04 기본은 3.12 → **pyenv 또는 deadsnakes PPA**로 3.11 격리. 본 문서의 모든 `python` 명령은 venv 활성화 후 사용하거나 명시적으로 `python3.11`을 쓴다.
+>  22.04 호환은 비범위 — Python 3.10 기본이라 deadsnakes 추가가 필요해 흐름이 달라진다.
+> **Python**: **3.12.x (Ubuntu 24.04 기본)**. `sudo apt install -y python3 python3-venv python3-dev` 한 줄로 끝. 본 문서의 모든 `python` 명령은 venv 활성화 후 사용한다 (venv의 `python` symlink가 3.12를 가리킴).
 
 ---
 
@@ -20,13 +20,14 @@ git checkout -b devC origin/main || git checkout devC
 # 0-B. apt baseline 한 번에 설치 (sudo 권한 필요)
 sudo apt update && sudo apt install -y \
   build-essential clang pkg-config libssl-dev \
-  git curl jq rsync unzip p7zip-full
+  git curl jq rsync unzip p7zip-full \
+  python3 python3-venv python3-dev
 
-# 0-C. Python 3.11 확보 (pyenv 또는 deadsnakes — ENVIRONMENT.md §2.1)
-python3.11 --version          # Python 3.11.x 기대
+# 0-C. 버전 확인
+python3 --version             # Python 3.12.x 기대 (Ubuntu 24.04 기본)
 node --version                # v20.x 기대 (UI 합동 디버깅용; nvm 권장)
 git --version                 # 2.43+ 기대
-/usr/bin/bash --version       # 5.2.x (24.04) 또는 5.1.x (22.04)
+/usr/bin/bash --version       # 5.2.x (24.04)
 
 # 0-D. 추가 시스템 체크
 locale -a | grep -E 'en_US.utf8|C.UTF-8' || sudo locale-gen en_US.UTF-8
@@ -45,10 +46,10 @@ cat /proc/sys/fs/inotify/max_user_watches   # ≥ 8192 권장 (UI/IDE와 공유)
 ```bash
 mkdir -p python-engine && cd python-engine
 
-# python3.11 명시 — Ubuntu 24.04 기본 python3는 3.12라 lock 외 버전이 들어옴
-python3.11 -m venv .venv
+# Ubuntu 24.04 기본 python3 (3.12)로 venv 생성
+python3 -m venv .venv
 source .venv/bin/activate
-python --version              # 활성화 후엔 그냥 python으로 3.11.x 확인 가능
+python --version              # 활성화 후엔 그냥 python으로 3.12.x 확인 가능
 
 pip install --upgrade pip
 pip install "flask==3.0.*" "waitress==3.0.*" "numpy==1.26.*" \
@@ -58,7 +59,7 @@ pip freeze > requirements.txt
 
 > *(노하우)* Ubuntu native bash에서는 venv 활성화 경로가 `.venv/bin/activate`다. (Windows Git Bash의 `.venv/Scripts/activate`는 사용 안 함.) 활성화 후 `which python`이 `~/src/Velxor/python-engine/.venv/bin/python`을 가리키는지 확인 — 그렇지 않으면 venv가 안 잡힌 상태로 `pip install`이 시스템 site-packages로 흘러간다.
 >
-> *(왜 python3.11 명시)* Ubuntu 24.04 기본 `python3`는 3.12라 `python3 -m venv`로 만들면 venv가 3.12로 잠긴다. `scikit-learn 1.4.x` 같은 핀 의존성을 3.11에 맞춰 검증했으므로 인터프리터부터 3.11로 고정해야 한다.
+> *(왜 24.04 기본 3.12 그대로 사용)* `numpy 1.26.x`, `scikit-learn 1.4.x`, `flask 3.0`, `waitress 3.0`, `requests 2.x` 모두 Python 3.12를 공식 지원한다. pyenv·deadsnakes PPA 없이 `apt install python3-venv` 한 줄로 끝나 Week 0 부담이 가장 작다. 22.04를 함께 지원해야 한다면 3.11로 다운그레이드해야 하지만 본 프로젝트는 24.04만 가정한다.
 >
 > *(왜 의존성을 한꺼번에 깔아두나)* `scikit-learn`은 Week 6.6 학습 단계, `requests`는 Week 6.7 p99 자가측정 스크립트에서 import된다. Week 0에 미리 잠가두지 않으면 Week 6의 22h 단일 블록 한복판에서 의존성 설치/버전 충돌로 시간을 잃는다.
 
@@ -857,7 +858,8 @@ Velxor/
 | p99 > 100ms | 모델 추론 느림 / threads=4 미적용 | `serve(..., threads=4)` 확인, 모델을 logistic으로 단순화 |
 | AC5 TP<9 | held-out v3 변형이 학습 분포 밖 | **임계값 완화 금지**. 결과 그대로 슬라이드 |
 | AC5 FP>1 | rsync/unzip/npm burst가 write_rate 트리거 | features에 `pid_fanout`, `ext_diversity` 가중 (학습 데이터에 npm-install 등 추가). `class_weight="balanced"`도 검토 |
-| `python3.11: command not found` | Ubuntu 24.04 기본 python3는 3.12 | `pyenv install 3.11.9` 또는 `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11 python3.11-venv` |
+| `python3: command not found` | apt 의존성 미설치 | `sudo apt install -y python3 python3-venv python3-dev` |
+| venv에 `python` 명령 없음 | `python3-venv` 누락 후 venv 생성 시도 | `python3-venv` 설치 후 venv 디렉토리 삭제·재생성 |
 | fanotify smoke 실패 (A 영역) | root 권한 부족, 커널 옵션 미활성 | `sudo` 로 실행 확인; `grep CONFIG_FANOTIFY /boot/config-$(uname -r)`가 `=y`인지 |
 | `chmod +x` 후에도 실행 안 됨 | git에 권한 비트 미반영 | `git update-index --chmod=+x scripts/foo.sh` 후 재커밋 |
 | `VELXOR_STUB=engine` 무효 | env 우선순위 무시 | `app.py` 최상단 `os.getenv` 분기 확인 |

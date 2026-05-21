@@ -25,7 +25,8 @@
 |---|---|---|
 | 빌드 베이스 | `build-essential` + `clang` + `pkg-config` + `libssl-dev` | `sudo apt install -y build-essential clang pkg-config libssl-dev` |
 | Rust | 1.78.0 (stable) | `rustup default 1.78.0`; `cargo --version`. rustup은 `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Python | 3.11.x (3.11.9 권장) | Ubuntu 24.04 기본은 3.12 — **pyenv** 또는 **deadsnakes PPA** 사용 |
+=======
+| Python | 3.12.x (Ubuntu 24.04 기본) | `sudo apt install -y python3 python3-venv python3-dev` 한 줄. 별도 PPA·pyenv 불필요 |
 | pip | 24.x | venv 내부 |
 | Node | 20 LTS (20.12 이상) | `nvm install 20` 권장 (apt는 22가 들어옴) |
 | npm | 10.x | Node 동봉 |
@@ -34,29 +35,16 @@
 | OBS Studio | 30.x (또는 PeekVK) | AC3 시연 영상 녹화. flatpak 또는 `sudo add-apt-repository ppa:obsproject/obs-studio && sudo apt install obs-studio` |
 | jq, curl, rsync, unzip, p7zip-full | apt | `sudo apt install -y jq curl rsync unzip p7zip-full` |
 
-### 2.1 Python 3.11 설치 (Ubuntu 24.04 기본은 3.12)
+### 2.1 Python 3.12 설치 (Ubuntu 24.04 기본)
 
-옵션 A — **pyenv (권장, 사용자 격리)**:
 ```bash
-sudo apt install -y make build-essential libssl-dev zlib1g-dev libbz2-dev \
-  libreadline-dev libsqlite3-dev libffi-dev liblzma-dev tk-dev
-curl -fsSL https://pyenv.run | bash
-# ~/.bashrc에 pyenv 초기화 추가 (출력 가이드 따름)
-exec bash -l
-pyenv install 3.11.9
-pyenv shell 3.11.9          # 또는 pyenv local 3.11.9 (디렉토리별)
-python --version            # Python 3.11.9
+sudo apt install -y python3 python3-venv python3-dev
+python3 --version          # Python 3.12.x
 ```
 
-옵션 B — **deadsnakes PPA (시스템 전역, 가벼움)**:
-```bash
-sudo add-apt-repository -y ppa:deadsnakes/ppa
-sudo apt update
-sudo apt install -y python3.11 python3.11-venv python3.11-dev
-python3.11 --version
-```
-
-> ⚠️ **주의**: 시스템의 `python3` (3.12)와 혼동 방지를 위해 본 프로젝트의 모든 스크립트는 **`python3.11`** 또는 **venv 활성화 후 `python`**을 명시한다. `python-is-python3` 패키지는 설치하지 않는다.
+> *(왜 3.12)* 24.04 기본 인터프리터를 그대로 사용해 pyenv/deadsnakes 의존성을 제거. `flask 3.0`, `waitress 3.0`, `requests 2.x`, `numpy 1.26.x`, `scikit-learn 1.4.x` 모두 Python 3.12를 공식 지원한다. (22.04를 함께 지원해야 하면 3.11로 다운그레이드하고 deadsnakes PPA 사용 — 본 문서는 24.04만 가정.)
+>
+> ⚠️ **`python-is-python3` 패키지는 설치하지 않는다.** 시스템 전역에 `python` alias를 거는 패키지로, venv 활성화 시 PATH 우선순위가 꼬일 수 있다. venv 활성화 후 사용하는 `python`은 venv의 symlink라 안전하다.
 
 ## 3. Python 패키지 (engine 측, requirements.txt 예정)
 
@@ -88,8 +76,8 @@ python3.11 --version
 - [ ] `lsb_release -a` → `Ubuntu 24.04 ...` (또는 22.04 명시 합의)
 - [ ] `locale -a | grep -E 'en_US.utf8|C.UTF-8'` → UTF-8 locale 사용 가능
 - [ ] `cargo --version` → `cargo 1.78.0`
-- [ ] `python3.11 --version` → `Python 3.11.x`
-- [ ] `python3.11 -c "import waitress; print(waitress.__version__)"` → `3.x` (venv 활성 상태)
+- [ ] `python3 --version` → `Python 3.12.x`
+- [ ] `python3 -c "import waitress; print(waitress.__version__)"` → `3.x` (venv 활성 상태)
 - [ ] `node --version` → `v20.x`
 - [ ] `npm --version` → `10.x`
 - [ ] `git --version` → `2.43+`
@@ -105,8 +93,7 @@ python3.11 --version
 sudo apt update && sudo apt install -y \
   build-essential clang pkg-config libssl-dev \
   git curl jq rsync unzip p7zip-full \
-  python3.11 python3.11-venv python3.11-dev
-# pyenv를 쓰면 위 python3.11* 3개는 생략 가능
+  python3 python3-venv python3-dev
 ```
 
 ## 6. 환경 drift 발견 시
