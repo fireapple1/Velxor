@@ -14,9 +14,11 @@
 > [`role-assignment.md`](./role-assignment.md)의 **3인 균등 분담 (A/B/C)** 으로 대체되었음. 본 문서는 **기술 명세의
 > source of truth**로 유지되며, ownership/시간 분배는 role-assignment.md를 기준으로 따른다.
 
+> **⚠️ OS Migration (2026-05-21)**: 원안의 Windows kernel minifilter(C+WDK) layer ①이 **Ubuntu 24.04 + Rust libfanotify userspace collector**로 대체됨. kernel module 미사용, BSOD/test-signing 의존성 제거, identity는 "사용자공간 행위 탐지기"로 약화. `BehaviorEventV1` wire 포맷은 유지(UTF-16LE → UTF-8, MAX_PATH 520 → PATH_MAX 4096만 변경)되어 layer ②/③/④는 입력 측면에서 동일. AC6 차단은 `TerminateProcess` 시퀀스에서 `kill(pid, SIGTERM/SIGKILL)`로 치환. 자세한 영향은 본 문서 곳곳의 *(Migration)* 인라인 노트 참조.
+
 ## Requirements Summary (from spec)
-- Windows 커널 레벨 **랜섬웨어 행위 탐지** 데모급 백신 (학교/공모전)
-- 4계층: C+WDK 커널 드라이버 / Rust 유저모드 서비스 / Python+AI 분석 엔진 / React+Electron UI
+- **Ubuntu 24.04 사용자공간 **랜섬웨어 행위 탐지** 데모급 백신 (학교/공모전)
+- 4계층: Rust+libfanotify 사용자공간 수집기 / Rust 통합 서비스 / Python+AI 분석 엔진 / React+Electron UI
 - **합성 PoC만** (학습/시연 자체생성), 한 학기 ~80-126 user-hours
 - 역할 분담은 [`role-assignment.md`](./role-assignment.md) (A/B/C 균등 ~40h)
 - 통합 전략 = **Walking Skeleton + Interface Evolution Gate**
@@ -40,7 +42,7 @@
 - Week 0: 환경 설치만 (6-8h, 학기 전 주말, additive).
 - Week 1: v1-**draft** 스키마 + 4계층 stub end-to-end (~15h).
 - Week 3: **async 48h v1.1 review** — driver/engine 팀원이 "missing/wrong field" 노트 제출, 본인이 additive-only v1.1 발행. 무응답 시 그대로 진행.
-- **Stub Retention Gate** (이전 이름 "Stub Deprecation Gate"에서 수정): 각 계층 실제 구현 도착 시 stub은 **삭제하지 않고** env flag `VELXOR_STUB=driver|engine|both`로 재활성 가능한 code path로 영속.
+- **Stub Retention Gate** (이전 이름 "Stub Deprecation Gate"에서 수정): 각 계층 실제 구현 도착 시 stub은 **삭제하지 않고** env flag `VELXOR_STUB=collector|engine|both`로 재활성 가능한 code path로 영속.
 - Pros: 통합 리스크 0, 매주 시연 가능, 팀원 지연 흡수, 스키마가 구현 학습과 함께 진화.
 - Cons: Week 0+Week 1 합산 ~21-23h 전반 부하; teammate review 무응답 시 v1.1 일방적 발행 가능성(Principle 4로 의도된 trade).
 
@@ -59,12 +61,12 @@
   - **AC4-체감**: 데모 영상에서 PoC 실행 시작 → UI 빨간 표시 wall-clock **≤ 1초** (사용자 체감, OBS 영상 timestamp로 검증).
 - **AC5 — 분류 정확도**: `scripts/eval-ac5.sh` → markdown 표. 통과: **≥9/10 TP, ≤1/10 FP**.
   - **AC5a**: positive set ≥2 PoC variants (확장자/속도/사이즈 변형); ≥1 (`v3 .pdf → .locked, 200 files/2s`)은 학습 held-out.
-  - **AC5b**: negative set에 bursty-but-benign workload 포함 (`robocopy /MIR`, 7zip 압축해제).
+  - **AC5b**: negative set에 bursty-but-benign workload 포함 (Ubuntu: `rsync -aH --delete`, `unzip`/`7z`, `git clone`(대형), `npm install`).
   - **AC5c (slide deck)**: 발표 자료에 "evaluated on synthetic PoC, not real-world malware" 명시.
   - **AC5 정책**: held-out v3에서 ≥9/10 미달 시 임계값 완화 X, 결과 그대로 슬라이드에 기록(honest reporting).
-- **AC6 — 차단 검증**: 차단 후 `tasklist /fi "pid eq <PID>"` 빈 결과 자동 확인 스크립트.
+- **AC6 — 차단 검증**: 차단 후 `! kill -0 "$PID" 2>/dev/null` 또는 `! test -e /proc/$PID`로 프로세스 부재를 자동 확인하는 스크립트. *(Migration: 원안 `tasklist /fi "pid eq <PID>"`)*
 - **AC7 — 발표 자료**: `docs/DEMO-SCRIPT.md` + 30-60초 영상 파일 존재.
-- **AC8 — Stub 영속성**: Stub code path가 env flag로 재활성. 검증 = `VELXOR_STUB=both`, `VELXOR_STUB=driver`, `VELXOR_STUB=engine` **3가지 단독 모드 모두** smoke test 통과.
+- **AC8 — Stub 영속성**: Stub code path가 env flag로 재활성. 검증 = `VELXOR_STUB=both`, `VELXOR_STUB=collector`, `VELXOR_STUB=engine` **3가지 단독 모드 모두** smoke test 통과. *(Migration: `driver` → `collector`)*
 
 ## Hour Ledger (≤126h ceiling, 트리거 >145h)
 
@@ -91,42 +93,41 @@
 ## Implementation Steps
 
 ### Week 0 — Tooling Install (학기 전 주말, 6-8h)
-- 0.1 Hyper-V/VMware로 Windows 10/11 격리 VM + snapshot 1
-- 0.2 `bcdedit /set testsigning on` + WDK 샘플 hello-world signed driver 로드 검증 → **Week 0 AC**
-- 0.3 `cargo new velxor-rust-service` 컴파일 OK (deps: tokio, tokio-tungstenite, reqwest, serde, tracing)
-- 0.4 `npm create vite@latest velxor-ui -- --template react-ts` + electron + `@xyflow/react` dev server
-- 0.5 Flask `/health` 200 (venv + Flask + **Waitress** threads=4; gunicorn은 Windows native 미지원이라 Waitress 사용)
-- 0.6 **ETW provider 스파이크**: PowerShell `Get-WinEvent` 또는 `xperf`로 file I/O 이벤트 1개 캡처 → driver fallback 경로 실증
+- 0.1 Ubuntu 24.04 bare-metal 또는 KVM/VirtualBox VM + (선택) timeshift/LVM snapshot 1
+- 0.2 **fanotify smoke**: 최소 Rust/C 샘플로 `~/velxor-work/src`에 `touch foo` 시 `FAN_MODIFY` 1개 캡처 (root 실행) → **Week 0 AC**. *(Migration: 원안 `bcdedit /set testsigning on` + WDK signed driver 로드)*
+- 0.3 `cargo new velxor-rust-service` 컴파일 OK (deps: tokio, tokio-tungstenite, reqwest, serde, tracing, fanotify-rs 또는 raw nix)
+- 0.4 `npm create vite@latest velxor-ui -- --template react-ts` + electron + `@xyflow/react` dev server (nvm 권장 — apt의 node는 22가 들어옴)
+- 0.5 Flask `/health` 200 (venv + Flask + **Waitress** threads=4; cross-platform이라 gunicorn 대신 그대로 유지해 AC4 sub-budget 측정 재현성 확보)
+- 0.6 **inotify 백업 스파이크**: `inotifywait -m -r ~/velxor-work`로 file I/O 이벤트 1개 캡처 → fanotify 실패 시 데모 backup 경로 실증. *(Migration: 원안 ETW `Get-WinEvent`/`xperf`)*
 
 ### Week 1 — Walking Skeleton (~15h)
 - **1.1 Interface Contract v1-draft** → `Velxor/contracts/interface-schema.md` (semver: v1 = additive only)
 
-  **Driver→Service 메시지 `BehaviorEventV1` (FltMgr comm port)**:
+  **Collector→Service 메시지 `BehaviorEventV1` (UNIX socket / stdout pipe JSONL)**:
   ```
   { schema_version: "1.0",
     seq: u64,                  // monotonic per session
-    dropped_since_last: u32,   // kernel buffer pressure signal
+    dropped_since_last: u32,   // collector queue pressure signal
     pid: u32, parent_pid: u32,
-    image_path: string,        // UTF-16LE NUL-terminated, max 520 bytes (MAX_PATH 대응)
+    image_path: string,        // UTF-8, max 4096 bytes (Linux PATH_MAX)
     event_type: enum(FileWrite|FileRename|ProcessCreate),
-    file_path: string?,        // UTF-16LE NUL-terminated, max 520 bytes
-    volume_id: string?,        // disambiguate across volumes, UTF-8
+    file_path: string?,        // UTF-8, max 4096 bytes
+    volume_id: string?,        // disambiguate across mount points, UTF-8 (예: ext4-dev-major-minor)
     op_detail: object?,        // event_type별 typed sub-record (FileWrite: u64 file_size, u32 entropy_hint)
     ts_unix_ms: u64 }
   ```
 
-  **Wire encoding**: JSON UTF-8 payload, max 4 KiB per message (FltMgr 1 MiB cap의 0.4% — 헤드룸 충분). `image_path`/`file_path`는 사전 truncate 후 UTF-8로 직렬화 (kernel 측 UTF-16LE → user 측 UTF-8 변환). 경로 잘림 시 `op_detail.path_truncated: true` 표기.
+  **Wire encoding**: JSON UTF-8 payload, **1 line = 1 message (JSONL)**, max 4 KiB per message. `image_path`/`file_path`는 UTF-8 그대로 직렬화 — `/proc/<pid>/exe` readlink 결과는 이미 UTF-8 byte string. 경로 잘림 시 `op_detail.path_truncated: true` 표기. *(Migration: 원안 UTF-16LE NUL-terminated + kernel→user 변환은 더 이상 불필요)*
 
-  **전송 메커니즘**: `FltSendMessage` (kernel→user inverted call, FltMgr **communication port**, *not* `IRP_MJ_DEVICE_CONTROL`/IOCTL). 큐 깊이 1024, drop 시 `dropped_since_last` 증가.
-  ⚠️ **`FltSendMessage`는 user-mode 응답까지 kernel을 블록할 수 있음**. user-mode reader는 별도 thread에서 dequeue하여 burst 시 kernel-side stall 회피.
+  **전송 메커니즘**: 일반 **UNIX domain socket**(`/run/velxor/events.sock`) 또는 **stdout pipe** (collector를 child process로 spawn). 둘 다 backpressure는 standard socket buffer로 처리. 큐 깊이(userspace ring buffer in collector) 1024, drop 시 `dropped_since_last` 증가. *(Migration: 원안 `FltSendMessage` kernel-side inverted call은 폐기 — userspace ↔ userspace IPC라 kernel-side stall 위험 없음)*
 
-  **Kernel-side 송신 정책** (architectural critical):
-  - `FltSendMessage` `Timeout` 파라미터 = 10ms (bounded, retry 없음)
-  - any lock 보유 중 송신 **금지** (사전 enqueue → worker thread dispatch)
-  - DPC/APC/critical region context에서 송신 **금지**
-  - timeout 또는 큐 full 발생 시 → `dropped_since_last++` 후 다음 successful send에 동봉 (silent drop 금지)
+  **Collector-side 송신 정책** (architectural critical):
+  - socket write에 `SO_SNDTIMEO = 10ms` 설정 (bounded, retry 없음)
+  - any mutex 보유 중 송신 **금지** (사전 enqueue → worker task dispatch)
+  - signal handler context에서 송신 **금지** (async-signal-safe 함수만 사용)
+  - timeout 또는 ring buffer full 발생 시 → `dropped_since_last++` 후 다음 successful send에 동봉 (silent drop 금지)
 
-  **REST `POST /classify`** (Flask + **Waitress** threads=4, classifier p99 < 100ms sub-budget; gunicorn은 Windows fork() 미지원으로 채택 불가):
+  **REST `POST /classify`** (Flask + **Waitress** threads=4, classifier p99 < 100ms sub-budget; cross-platform이라 Linux에서도 그대로 유지해 측정 재현성 확보. gunicorn은 옵션이나 thread vs fork model 차이로 AC4 수치가 흔들려 채택 보류):
   ```
   req:  { events: BehaviorEventV1[], window_ms: u32 }
   resp: { verdict: enum(benign|ransomware), confidence: f32, evidence: string[],
@@ -155,13 +156,15 @@
   **`VELXOR_STUB` env flag semantics**:
   | Value | Rust 측 | Python 측 |
   |-------|---------|-----------|
-  | `unset` (default) | 실 FltMgr comm port 어댑터 사용 | 학습된 모델 또는 rule-based fallback |
-  | `driver` | `events.jsonl` 폴링 (driver stub) | 변경 없음 |
+  | `unset` (default) | 실 libfanotify collector 어댑터 사용 | 학습된 모델 또는 rule-based fallback |
+  | `collector` | `events.jsonl` 폴링 (collector stub) | 변경 없음 |
   | `engine` | 변경 없음 | Week 1 하드코드 verdict `{ransomware, 0.95}` |
   | `both` | `events.jsonl` 폴링 | 하드코드 verdict |
 
+  *(Migration)* 원안 `VELXOR_STUB=driver` 값은 `collector`로 rename. 의미·동작은 동일.
+
 - 1.2 Rust service stub (`Velxor/rust-service/`): `events.jsonl` poll, REST stub call, WS server with separate replay `VecDeque`.
-- 1.3 Python engine stub (`Velxor/python-engine/`): Flask + Waitress threads=4 (Windows fork() 미지원으로 gunicorn 대체), 하드코드 verdict.
+- 1.3 Python engine stub (`Velxor/python-engine/`): Flask + Waitress threads=4 (cross-platform; gunicorn 대신 그대로 유지해 측정 재현성 확보), 하드코드 verdict.
 - 1.4 UI stub (`Velxor/ui/`): Electron + Vite + React Flow, WS client with reconnect.
 - 1.5 `scripts/run-all.sh` + `scripts/ws-record.sh` (WS 메시지 캡처용, AC1 검증).
 - 1.6 **Mechanical schema acknowledgment**: 팀원1/팀원2가 schema 읽고 "컴파일 가능" 한 줄 응답. 의미 검토는 Week 3.
@@ -181,7 +184,7 @@
 - 4.2 Rust: burst detection (FileWrite≥50/1s OR FileRename≥30/1s)
 - 4.3 Rust: REST → `/classify` + verdict cache per PID
 - 4.4 Rust: **tokio broadcast channel = live fan-out + 별도 `VecDeque` = 5초 replay (lock-protected, >1000 events 가능)**
-- **4.5 통합 포인트 (드라이버)** — 팀원1 driver 도착 시 본인 Rust 입력 어댑터 교체. 미도착 시 `VELXOR_STUB=driver` 영속, 진행 차단 없음.
+- **4.5 통합 포인트 (collector)** — 팀원1 libfanotify collector 도착 시 본인 Rust 입력 어댑터 교체. 미도착 시 `VELXOR_STUB=collector` 영속, 진행 차단 없음.
 - **4.6 통합 포인트 (모델)** — 팀원2 모델 도착 시 `/classify` 응답 교체. 미도착 시 rule-based fallback (write rate ≥50/1s → ransomware 0.9), 동일 인터페이스 유지.
 
 ### Week 6-7 — 합성 PoC + 데이터셋 (~20h)
@@ -190,16 +193,16 @@
   - `v2/`: .txt → .crypted, 500 files/0.8s
   - `v3/`: .pdf → .locked, 200 files/2s (hardest, **held-out**)
 - 6.3 positive 데이터셋 생성기 (v1+v2 학습용, v3 held-out)
-- **6.4 AC5b bursty-benign 생성**: `robocopy /MIR src dst`, 7zip 압축해제 → negative 로그
+- **6.4 AC5b bursty-benign 생성 (Ubuntu)**: `rsync -aH --delete src/ dst/`, `unzip`/`7z` 압축해제, `git clone`(대형 저장소), `npm install`(node_modules 폭발) → negative 로그
 - 6.5 데이터셋 인계 + 팀원2 학습 트리거 (또는 rule-based fallback 영속)
 - 6.6 UI 통합 검증 (full pipeline 1회)
 
 ### Week 8-9 — 통합 + 차단 + AC5 측정 (~15h)
-- **8.1 자동 차단** (Deferral 후보 #3) — Rust → `OpenProcess(PROCESS_TERMINATE, false, pid)` → `TerminateProcess(handle, 1)` → `CloseHandle(handle)` (또는 UI Block 버튼 → IPC → 동일 시퀀스). handle open 실패/terminate 실패 시 fallback 로그.
+- **8.1 자동 차단** (Deferral 후보 #3) — Rust → `nix::sys::signal::kill(Pid::from_raw(pid), Signal::SIGTERM)` → 200ms timeout 대기 → `kill(.., Signal::SIGKILL)` fallback (또는 UI Block 버튼 → IPC → 동일 시퀀스). `EPERM`(권한 부족)·`ESRCH`(이미 종료) 발생 시 fallback 로그. root 또는 동일 uid 필요 — collector가 root로 떠 있어 충족. *(Migration: 원안 `OpenProcess`/`TerminateProcess`/`CloseHandle` 시퀀스)*
 - 8.2 `docs/DEMO-SCRIPT.md` (1분 흐름)
 - 8.3 UI 폴리싱 (애니메이션, 색상, 타이밍)
-- **8.4 AC5 측정**: `scripts/eval-ac5.sh` — v1+v2 학습, v3 held-out + robocopy/7z negative로 평가, `docs/AC5-results.md` 산출.
-- 8.5 사전 리허설 **3회 (Week 9)**, snapshot rollback 시간 측정 (목표 < 60s/round) → `docs/REHEARSAL-LOG.md`. BSOD 발생 시 즉시 `VELXOR_STUB=driver` 모드로 데모 시나리오 변경.
+- **8.4 AC5 측정**: `scripts/eval-ac5.sh` — v1+v2 학습, v3 held-out + rsync/unzip/git-clone/npm-install negative로 평가, `docs/AC5-results.md` 산출.
+- 8.5 사전 리허설 **3회 (Week 9)**, snapshot rollback 시간 측정 (목표 < 60s/round; bare-metal이면 `timeshift` 또는 LVM snapshot) → `docs/REHEARSAL-LOG.md`. collector crash·queue overflow 발생 시 즉시 `VELXOR_STUB=collector` 모드로 데모 시나리오 변경. *(Migration: 원안 BSOD → collector crash로 대체. userspace라 시스템 전체 다운 없음.)*
 
 ### Week 10 — 발표 준비 (~10h)
 - 10.1 슬라이드 (아키텍처, 데이터 전략, AC5 결과, **AC5c disclaimer**)
@@ -215,13 +218,13 @@ Velxor/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── main.rs
-│       ├── driver_source.rs      # events.jsonl ↔ FltMgr comm port adapter (env flag switch)
+│       ├── collector_source.rs   # events.jsonl ↔ libfanotify adapter (env flag switch)
 │       ├── aggregator.rs         # sliding window per PID
 │       ├── classifier_client.rs
 │       └── ws_broadcaster.rs     # broadcast + separate VecDeque replay
 ├── python-engine/
 │   ├── app.py
-│   ├── waitress_conf.py            # Waitress threads=4 (Windows native WSGI)
+│   ├── waitress_conf.py            # Waitress threads=4 (cross-platform WSGI)
 │   ├── features.py
 │   ├── fallback_rules.py         # rule-based fallback (AC8 path)
 │   ├── requirements.txt
@@ -256,10 +259,10 @@ Velxor/
 
 | Risk | Likelihood | Impact | Trigger | Mitigation |
 |------|-----------|--------|---------|------------|
-| 팀원1 driver 지연 | High | Medium | Week 4 종료 시 driver가 `events.jsonl`조차 emit 안함 | Week 0 ETW 스파이크 결과 즉시 가동; `VELXOR_STUB=driver` 영속; driver는 "future work" |
+| 팀원1 collector 지연 | High | Medium | Week 4 종료 시 collector가 `events.jsonl`조차 emit 안함 | Week 0 fanotify smoke 결과 즉시 가동; `VELXOR_STUB=collector` 영속; collector "future work: LSM/eBPF 강화" 표기 |
 | 팀원2 모델 미완성 | Medium | Medium | Week 7 종료 시 학습 모델 없음 | rule-based fallback 영속 (`fallback_rules.py`), `model_version: "rule-based-v1"` |
-| Test signing → driver 로드 실패 | Medium | High | Week 0 AC 0.2 미달성 | ETW 백업 경로 확정; driver 컴포넌트 슬라이드에 "future work" 표기 |
-| Driver crash → BSOD | Low | High | 리허설 중 BSOD 1회 이상 | VM snapshot rollback (<60s); 리허설 3회 중 1회 BSOD 시 `VELXOR_STUB=driver` 데모 모드 |
+| fanotify 권한·커널 옵션 실패 | Medium | High | Week 0 AC 0.2 미달성 (root 권한·AppArmor·CONFIG_FANOTIFY) | inotify 백업 경로(0.6) 확정; collector 슬라이드에 "permission caveats" 표기 |
+| Collector crash / queue overflow | Low | Medium | 리허설 중 collector 1회 이상 sigsegv 또는 `dropped_since_last` 폭증 | systemd `Restart=on-failure` + drop counter alert; 1회 crash 시 `VELXOR_STUB=collector` 데모 모드. (userspace라 시스템 전체 다운 없음) |
 | WS reconnect 불안정 | Medium | Low | 리허설 중 끊김 관측 | Rust 5초 replay (separate VecDeque) + UI exponential backoff + Electron dev 핫리로드 disable |
 | 합성 PoC 일반화 의문 | Medium | Low | 발표 Q&A | AC5c slide note + "real-world testing future work" |
 | **시간 예산 ≥115% 초과 (>145h)** | **High** | **Medium** | **누적 hours > 145** | **사전 정의 deferral order 자동 적용** (사운드 → Timeline → 자동차단 → 백업영상) |
@@ -275,10 +278,10 @@ Velxor/
 | AC2 | `poc-bench.sh` exit 0 (wall-clock < 1s for 300 ops 출력) |
 | AC3 | OBS 영상 + `docs/AC3-evidence/frame-1000ms.png` |
 | AC4 | `scripts/eval-ac4.sh` 출력 (event→ws p99<1000ms, classify p99<100ms); 데모 영상 timestamp로 체감 ≤1s 검증 |
-| AC5/5a/5b/5c | `docs/AC5-results.md` (held-out v3 표시, robocopy/7z workload 라벨), slides.pdf 페이지 X disclaimer |
-| AC6 | `scripts/ac6-verify-block.sh` 자동화 (`tasklist /fi "pid eq <PID>"` 빈 결과 또는 ps exit≠0) |
+| AC5/5a/5b/5c | `docs/AC5-results.md` (held-out v3 표시, rsync/unzip/git-clone/npm-install workload 라벨, "synthetic PoC + Linux/ext4" disclaimer), slides.pdf 페이지 X disclaimer |
+| AC6 | `scripts/ac6-verify-block.sh` 자동화 (`! kill -0 "$PID" 2>/dev/null` 또는 `! test -e /proc/$PID`) |
 | AC7 | `docs/DEMO-SCRIPT.md` + `videos/demo.mp4` (≥30s) |
-| AC8 | `VELXOR_STUB=both`, `VELXOR_STUB=driver`, `VELXOR_STUB=engine` 3 모드 모두 `run-all.sh` smoke pass |
+| AC8 | `VELXOR_STUB=both`, `VELXOR_STUB=collector`, `VELXOR_STUB=engine` 3 모드 모두 `run-all.sh` smoke pass |
 
 ## ADR
 
@@ -303,7 +306,7 @@ Velxor/
 - 부정: Week 0+1 부하 집중 (~21-23h); 무응답 작업자의 입력은 자동 누락(Principle 4 의도된 trade); v1.0 wrong-typed 필드는 `*_v2` parallel field로 우회해야 함 (escape hatch).
 
 **Follow-ups**:
-- Week 0 종료: tooling install AC (0.1-0.6) + ETW 스파이크 sign-off
+- Week 0 종료: tooling install AC (0.1-0.6) + fanotify smoke sign-off (+ inotify 백업 경로 캡처)
 - Week 1 종료: walking-skeleton-v1 git tag
 - Week 3 종료: v1.1 schema published
 - Week 4 종료: 첫 AC4 정량 측정 (event→ws p99, classify p99)
@@ -326,6 +329,22 @@ Velxor/
 
 ### Iteration 3 (post-CCG review, 2026-05-20)
 - **CCG**: Codex 16건 finding 산출, Gemini 429 실패. 적용 사항: (1) `IOCTL` → FltMgr comm port 용어 통일, (2) gunicorn → Waitress (Windows 호환), (3) `TerminateProcess(pid)` → handle 시퀀스 정정, (4) wire encoding 명세 추가, (5) kernel-side 송신 정책 보강, (6) WS reconnect handshake 추가, (7) hour ledger 120h → 126h 공식 조정, (8) 단일 owner 모델 → [`role-assignment.md`](./role-assignment.md) 3인 균등 분담 supersede.
+
+### Iteration 4 (OS Migration → Ubuntu, 2026-05-21)
+- **CCG**: Codex 36건 진단 + Gemini 6건 보충. 결정: layer ①을 **Ubuntu 24.04 + Rust libfanotify userspace collector**로 전환 (사용자 채택). 적용 사항:
+  (1) Windows kernel minifilter(C+WDK) → libfanotify userspace, kernel module 미사용
+  (2) `FltMgr comm port` / `FltSendMessage` → UNIX socket `/run/velxor/events.sock` 또는 stdout pipe JSONL
+  (3) UTF-16LE NUL-terminated MAX_PATH 520 → **UTF-8 PATH_MAX 4096**
+  (4) `OpenProcess`+`TerminateProcess`+`CloseHandle` 시퀀스 → `kill(pid, SIGTERM)` → 200ms → `kill(.., SIGKILL)` 시퀀스
+  (5) AC6 `tasklist /fi` → `! kill -0 $PID` 또는 `! test -e /proc/$PID`
+  (6) AC5b `robocopy /MIR`/7zip → `rsync -aH --delete` / `unzip`·`7z` / `git clone` / `npm install`
+  (7) Week 0 `bcdedit testsigning`+WDK signed driver → **fanotify smoke**, ETW `Get-WinEvent`/`xperf` → **inotify 백업 스파이크**
+  (8) `VELXOR_STUB=driver` → `VELXOR_STUB=collector` 일괄 rename
+  (9) Waitress 명세 "Windows native WSGI" → "cross-platform" (gunicorn 대체 이유는 측정 재현성으로 재정의)
+  (10) BSOD/snapshot rollback → collector crash + `Restart=on-failure`로 대체 (userspace라 시스템 전체 다운 위험 없음)
+  (11) 호스트/Guest OS = Ubuntu 24.04 LTS, Python 3.11은 pyenv 또는 deadsnakes PPA 격리, `.venv/Scripts/activate` → `.venv/bin/activate`
+- **영향**: identity 한 줄(README)이 "Windows 커널 백신" → "Linux 사용자공간 행위 탐지기"로 약화. AC5c disclaimer에 *"Evaluated on Linux/ext4 + fanotify userspace collector; Windows NTFS/minifilter behavior may differ."* 추가. `BehaviorEventV1` JSONL wire 포맷은 보존되어 layer ②/③/④ 코드는 입력 측 어댑터 외 변경 없음.
+- **잠재 follow-up (선택)**: LSM/eBPF 강화 → 정체성 회복(현재는 future work)
 
 ### Final wording pass (applied to this final plan)
 1. AC8: `VELXOR_STUB=driver`, `=engine`, `=both` 3 모드 모두 검증 ✓
