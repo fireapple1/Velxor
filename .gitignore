@@ -1,0 +1,28 @@
+# OMC harness state (session-local, not part of project)
+.omc/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Rust (placeholder — for upcoming velxor-rust-service)
+target/
+**/*.rs.bk
+
+# Python (placeholder — for upcoming velxor python-engine)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / Electron (placeholder — for upcoming UI)
+node_modules/
+dist/
+build/
+out/
+*.log
