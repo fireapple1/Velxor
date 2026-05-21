@@ -17,7 +17,7 @@
 작업자 C가 단독으로 책임지는 산출물은 다음과 같다.
 
 - **REST API 서버**
-  - Flask + **Waitress** (Windows 네이티브 WSGI, `threads=4`) 기반
+  - Flask + **Waitress** (cross-platform WSGI, `threads=4`) 기반 — Linux/Ubuntu에서도 동일 가동, AC4 sub-budget 측정 재현성 확보
   - 엔드포인트: `POST /classify`, `GET /health`
 - **`features.py`** — 행위 윈도우 기반 통계 추출
   - write rate, rename rate, 확장자 다양성, 파일 크기 분포, PID 트리 fan-out
@@ -66,9 +66,10 @@
   - `v3/`: `.pdf → .locked`, 200 files/2s — **held-out (학습 금지)**
 - **6.3 positive 데이터셋 생성기**
   - v1 + v2 학습용, v3 held-out
-- **6.4 AC5b bursty-benign negative 데이터셋**
-  - `robocopy /MIR src dst`
-  - 7zip 압축 해제 등 — benign 이지만 폭발적 I/O가 발생하는 케이스
+- **6.4 AC5b bursty-benign negative 데이터셋** (Ubuntu 워크로드)
+  - `rsync -aH --delete src/ dst/` (Windows robocopy /MIR 대응)
+  - `unzip sample.zip -d tmp_extract` 또는 `7z x sample.zip -o tmp_extract`
+  - `tar xf large.tar.gz`, `git clone <large repo>`, `npm/pnpm install` (node_modules 폭발) — benign 이지만 폭발적 I/O가 발생하는 케이스
 - **`features.py` 본구현** — 위의 통계 피처들
 - **학습 모델 트레이닝**
   - `/classify` p99 < 100ms 만족 (Waitress threads=4)
@@ -79,7 +80,7 @@
 ### Week 8-9 — 통합·측정 (약 8h)
 
 - **8.4 AC5 측정** — `scripts/eval-ac5.sh`
-  - v1+v2 학습, v3 held-out + robocopy/7zip negative 로 평가
+  - v1+v2 학습, v3 held-out + rsync/unzip(7z)/npm-install negative 로 평가
   - **합격선: TP ≥ 9/10, FP ≤ 1/10**
   - 결과는 `docs/AC5-results.md` 로 산출
 - **AC4 측정** — `scripts/eval-ac4.sh`
@@ -127,7 +128,7 @@
 | **AC4** 지연시간 | `eval-ac4.sh` — event→ws p99 < 1000ms, classify p99 < 100ms | B(tracing instrumentation) + **C(측정 스크립트)** |
 | **AC5** 분류 정확도 | `eval-ac5.sh`, `AC5-results.md` — TP ≥ 9/10, FP ≤ 1/10 | C 단독 |
 | **AC5a** held-out v3 | `poc-samples/v3/` (.pdf → .locked) | C 단독 |
-| **AC5b** bursty-benign negative | robocopy / 7zip 로그 | C 단독 |
+| **AC5b** bursty-benign negative | rsync / unzip(7z) / npm-install 로그 (Ubuntu) | C 단독 |
 | **AC5c** disclaimer | slide deck "evaluated on synthetic PoC, not real-world malware" | C 단독 |
 | **AC8** stub 영속성 | `VELXOR_STUB=engine` smoke pass | C 가 engine 모드 담당 |
 
@@ -160,7 +161,7 @@ Velxor/
 │       └── v3/                       # C — .pdf → .locked (held-out)
 ├── datasets/
 │   ├── positive/                     # C
-│   └── negative/                     # C — robocopy/7zip 로그
+│   └── negative/                     # C — rsync / unzip(7z) / npm-install 로그
 ├── scripts/
 │   ├── poc-bench.sh                  # C — AC2
 │   ├── eval-ac4.sh                   # C — tracing JSON → p99

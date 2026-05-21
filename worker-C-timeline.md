@@ -3,8 +3,9 @@
 > **목적**: 이 문서 하나만 위에서 아래로 따라가면 작업자 C의 ~40h 분량(Python 분석 엔진 + 합성 PoC + AC2/AC4/AC5 측정 + 발표 슬라이드)이 그대로 진행된다.
 > **선행 문서**: [`worker-C-tasks.md`](./worker-C-tasks.md), [`velxor-consensus-plan.md`](./velxor-consensus-plan.md), [`ENVIRONMENT.md`](./ENVIRONMENT.md)
 > **브랜치**: `devC` (모든 PR은 `devC → main`)
-> **OS 가정**: Windows 10 build 19045 또는 Windows 11 build 22631 VM, Git Bash 또는 WSL2 쉘
-> **Python**: 3.11.x (3.11.9 권장)
+> **OS 가정**: **Ubuntu 24.04 LTS** (bare-metal 또는 VM), native `/usr/bin/bash` 5.2.
+>  22.04로 다운그레이드 시 [`ENVIRONMENT.md`](./ENVIRONMENT.md) §2.1 deadsnakes PPA·apt 버전 표 별도 검증.
+> **Python**: 3.11.x (3.11.9 권장) — Ubuntu 24.04 기본은 3.12 → **pyenv 또는 deadsnakes PPA**로 3.11 격리. 본 문서의 모든 `python` 명령은 venv 활성화 후 사용하거나 명시적으로 `python3.11`을 쓴다.
 
 ---
 
@@ -12,17 +13,29 @@
 
 ```bash
 # 0-A. 저장소 클론 + devC 브랜치 진입
-cd ~ && git clone <REPO_URL> Velxor && cd Velxor
+mkdir -p ~/src && cd ~/src
+git clone <REPO_URL> Velxor && cd Velxor
 git checkout -b devC origin/main || git checkout devC
 
-# 0-B. 버전 락 검증 (ENVIRONMENT.md §5 일부)
-python --version              # 3.11.x 기대
-node --version                # v20.x 기대 (UI 합동 디버깅용)
+# 0-B. apt baseline 한 번에 설치 (sudo 권한 필요)
+sudo apt update && sudo apt install -y \
+  build-essential clang pkg-config libssl-dev \
+  git curl jq rsync unzip p7zip-full
+
+# 0-C. Python 3.11 확보 (pyenv 또는 deadsnakes — ENVIRONMENT.md §2.1)
+python3.11 --version          # Python 3.11.x 기대
+node --version                # v20.x 기대 (UI 합동 디버깅용; nvm 권장)
 git --version                 # 2.43+ 기대
-bash --version                # 5.x 기대
+/usr/bin/bash --version       # 5.2.x (24.04) 또는 5.1.x (22.04)
+
+# 0-D. 추가 시스템 체크
+locale -a | grep -E 'en_US.utf8|C.UTF-8' || sudo locale-gen en_US.UTF-8
+cat /proc/sys/fs/inotify/max_user_watches   # ≥ 8192 권장 (UI/IDE와 공유)
 ```
 
-> 어느 하나라도 어긋나면 **여기서 중단**하고 `ENVIRONMENT.md §6` 절차로 버전 맞춘 후 재진입.
+> 어느 하나라도 어긋나면 **여기서 중단**하고 [`ENVIRONMENT.md §6`](./ENVIRONMENT.md)·§2.1 절차로 버전 맞춘 후 재진입.
+>
+> *(체크리스트)* `locale -a`로 UTF-8 locale을 확인하고, `ulimit -n`(open files)·`fs.inotify.max_user_watches`를 점검하면 이후 UI·collector(A 영역) 동시 가동 시 watch 한계 누락을 사전 차단할 수 있다.
 
 ---
 
@@ -32,10 +45,10 @@ bash --version                # 5.x 기대
 ```bash
 mkdir -p python-engine && cd python-engine
 
-python -m venv .venv
-# Git Bash
-source .venv/Scripts/activate
-# (WSL/Linux면: source .venv/bin/activate)
+# python3.11 명시 — Ubuntu 24.04 기본 python3는 3.12라 lock 외 버전이 들어옴
+python3.11 -m venv .venv
+source .venv/bin/activate
+python --version              # 활성화 후엔 그냥 python으로 3.11.x 확인 가능
 
 pip install --upgrade pip
 pip install "flask==3.0.*" "waitress==3.0.*" "numpy==1.26.*" \
@@ -43,7 +56,9 @@ pip install "flask==3.0.*" "waitress==3.0.*" "numpy==1.26.*" \
 pip freeze > requirements.txt
 ```
 
-> *(노하우)* Windows Git Bash에서는 `.venv/Scripts/activate`, WSL/순수 Linux에서는 `.venv/bin/activate`를 사용해야 PATH와 `VIRTUAL_ENV`가 올바르게 주입된다. 잘못된 경로면 `which python`이 시스템 파이썬을 가리키고 이후 `pip install`이 venv 밖으로 흘러간다.
+> *(노하우)* Ubuntu native bash에서는 venv 활성화 경로가 `.venv/bin/activate`다. (Windows Git Bash의 `.venv/Scripts/activate`는 사용 안 함.) 활성화 후 `which python`이 `~/src/Velxor/python-engine/.venv/bin/python`을 가리키는지 확인 — 그렇지 않으면 venv가 안 잡힌 상태로 `pip install`이 시스템 site-packages로 흘러간다.
+>
+> *(왜 python3.11 명시)* Ubuntu 24.04 기본 `python3`는 3.12라 `python3 -m venv`로 만들면 venv가 3.12로 잠긴다. `scikit-learn 1.4.x` 같은 핀 의존성을 3.11에 맞춰 검증했으므로 인터프리터부터 3.11로 고정해야 한다.
 >
 > *(왜 의존성을 한꺼번에 깔아두나)* `scikit-learn`은 Week 6.6 학습 단계, `requests`는 Week 6.7 p99 자가측정 스크립트에서 import된다. Week 0에 미리 잠가두지 않으면 Week 6의 22h 단일 블록 한복판에서 의존성 설치/버전 충돌로 시간을 잃는다.
 
@@ -72,6 +87,8 @@ if __name__ == "__main__":
 ```
 
 > *(개념)* Flask 내장 dev 서버는 단일 스레드 동기 처리라 `/classify` 요청 1건이 IO blocking에 들어가면 후속 요청이 줄을 선다. Waitress는 production-grade WSGI 서버로 worker thread pool을 둔다. `threads=4`는 Python GIL 제약 아래에서 IO-blocking 동안 다른 요청을 받기 위한 실용적 최소값으로, AC4의 `/classify p99<100ms` sub-budget을 직선적으로 깎는 첫 번째 손잡이다.
+>
+> *(Why Waitress on Linux)* Linux에서는 gunicorn(fork model)도 옵션이지만, 원안의 측정 재현성·thread 거동 일관성을 위해 Waitress(cross-platform, thread pool)를 유지한다. 추후 AC4가 fork 기반에서 더 유리하다고 판단되면 별도 PR로 교체.
 >
 > *(참조)* thread 수·`channel_timeout`·`expose_tracebacks` 같은 추가 튜닝 옵션은 Waitress 공식 문서의 *Arguments to `waitress.serve`* 절을 참조.
 
@@ -170,7 +187,7 @@ def classify_events(events: list[dict], window_ms: int) -> dict:
 
 ### 2.4 Week 1 검증 게이트
 ```bash
-cd python-engine && source .venv/Scripts/activate
+cd python-engine && source .venv/bin/activate
 VELXOR_STUB=engine python waitress_conf.py &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -385,18 +402,41 @@ def emit(events, out_path):
 
 > *(노하우)* JSONL은 **1줄 = 완전한 JSON 객체 1개**가 절대 규칙. 줄바꿈을 객체 내부에 넣으면 line-by-line streaming 파서가 깨진다. `json.dumps(e, ensure_ascii=False)`로 emit 시 마지막에 명시적으로 `+ "\n"`을 붙이고, 읽는 쪽은 `for line in open(...)` 패턴으로 처리해 메모리에 전체 파일을 올리지 않는다. AC5 평가 스크립트의 `jq -s '.'`도 이 가정을 깔고 있다.
 
-### 6.4 [Day 4, 3h] AC5b Negative 데이터셋 (bursty-benign)
+### 6.4 [Day 4, 3h] AC5b Negative 데이터셋 (bursty-benign, Ubuntu 워크로드)
+
+데이터셋 디렉토리는 ext4 로컬에 두고 `/tmp`(tmpfs)는 피한다 — tmpfs는 페이지 캐시 대신 RAM 직격이라 디스크 IO 측정이 비현실적으로 빨라진다.
+
 ```bash
-mkdir -p datasets/negative
-# Case 1: robocopy /MIR (Windows 한정, VM 안에서 실행)
-robocopy "C:\src" "C:\dst" /MIR /LOG:datasets/negative/robocopy_run_01.log
+mkdir -p datasets/negative ~/velxor-work/{src,dst}
 
-# Case 2: 7zip 압축 해제
-7z x sample.zip -o"./tmp_extract" > datasets/negative/7zip_run_01.log
+# 사전: src에 소파일 트리 준비 (대량 rename/write를 유도하기 위해 ≥1000개)
+for i in $(seq 1 1000); do
+  echo "dummy-$i" > ~/velxor-work/src/file_$(printf '%04d' "$i").txt
+done
+
+# Case 1 (robocopy /MIR 대응): rsync mirror — temp-file rename 동반
+rsync -aH --delete ~/velxor-work/src/ ~/velxor-work/dst/ \
+  --info=NAME,STATS2 > datasets/negative/rsync_run_01.log 2>&1
+#  --inplace 금지: rsync 기본은 `.~tmp~` 파일 → atomic rename이라 FileRename burst가 정확히 robocopy와 같은 의미
+
+# Case 2 (7z 압축 해제): unzip 또는 p7zip
+unzip -o some-archive.zip -d ./tmp_extract \
+  > datasets/negative/unzip_run_01.log 2>&1
+# 또는: 7z x some-archive.7z -otmp_extract > datasets/negative/7z_run_01.log 2>&1
+
+# Case 3 (Linux native bursty-benign — 개발자 도구 시나리오)
+# 큰 저장소 git clone 또는 npm/pnpm install — node_modules 폭발
+git clone --depth 1 https://github.com/expressjs/express ~/velxor-work/repo \
+  > datasets/negative/gitclone_run_01.log 2>&1
+( cd ~/velxor-work/repo && npm install --silent ) \
+  > datasets/negative/npm_install_run_01.log 2>&1
 ```
-→ negative 샘플 ≥10개 확보. 합성 PoC와 동일한 JSONL 포맷으로 변환하는 `scripts/log-to-events.py` 작성.
 
-> *(Why robocopy /MIR + 7zip)* 둘 다 짧은 시간에 **고밀도 FileWrite/FileRename** burst를 일으키는 대표적 정상 워크로드다. `write_rate`만 보는 모델은 robocopy를 ransomware로 오탐할 가능성이 가장 크고, 이 두 케이스에서 FP≤1/10을 통과해야 모델이 단순 임계치가 아니라 다변수 분류기임이 증명된다. AC5b의 의도가 바로 "정상 burst와 악성 burst의 구분력" 측정.
+→ negative 샘플 ≥10개 확보 (rsync/unzip/git-clone/npm-install 4종을 변형 반복하면 충분). 합성 PoC와 동일한 JSONL 포맷으로 변환하는 `scripts/log-to-events.py` 작성. **수집 방식 일관성을 위해 가능하면 작업자 A의 fanotify collector를 함께 띄워 동일 파이프라인으로 JSONL emit하는 게 가장 깔끔하다** (그렇지 않으면 robocopy 로그·rsync `--info` 출력 등 이질적 텍스트를 파싱해야 함).
+
+> *(Why rsync + unzip + npm-install)* 셋 다 짧은 시간에 **고밀도 FileWrite/FileRename** burst를 일으키는 Ubuntu 환경의 대표적 정상 워크로드다. rsync는 robocopy의 직계 대응으로 temp-file rename 패턴까지 유사하고, unzip/7z는 압축 해제로 인한 다양한 확장자 동시 쓰기, `npm install`은 node_modules에 만 단위 소파일을 순식간에 풀어 ext_diversity·pid_fanout이 동시에 높은 가장 가혹한 FP 케이스다. `write_rate` 단독 모델은 이 셋 중 하나라도 ransomware로 오탐할 가능성이 크고, 모두에서 FP≤1/10을 통과해야 모델이 단순 임계치가 아니라 다변수 분류기임이 증명된다.
+>
+> *(노하우)* `apt`/`dpkg` 업데이트도 좋은 후보지만 sudo 권한 + 시스템 영향이 있어 학습 데이터로는 부담스럽다. 위 4종(`rsync`, `unzip/7z`, `git clone`, `npm install`)이 sudo 없이 user-space에서 일관 재현 가능해 가장 안전하다.
 
 ### 6.5 [Day 5-6, 6h] `features.py` 본구현
 `python-engine/features.py`:
@@ -440,9 +480,9 @@ def _zero_vector():
             ("write_rate","rename_rate","ext_diversity","size_mean","size_std","pid_fanout")}
 ```
 
-> *(Why ext_diversity + pid_fanout)* 두 피처가 robocopy/7zip(정상 burst)과 ransomware burst를 가르는 결정적 축이다.
-> - `ext_diversity`: robocopy는 보통 한두 가지 확장자 디렉토리를 미러링 — 낮은 다양성. ransomware는 무차별 다파일 암호화 → 높은 다양성.
-> - `pid_fanout`: 정상 도구는 메인 PID + 자식 워커 소수. ransomware는 자식 분기·스레드 폭이 더 넓거나, 반대로 단일 PID에서 폭주적 IO를 한다 — 둘 다 정상 분포에서 이탈 신호.
+> *(Why ext_diversity + pid_fanout)* 두 피처가 rsync/unzip/npm-install(정상 burst)과 ransomware burst를 가르는 결정적 축이다.
+> - `ext_diversity`: rsync mirror·git clone은 입력 트리의 확장자를 그대로 보존(소수 클래스) — 낮은 다양성. ransomware는 무차별 다파일 암호화로 단일 확장자(`.locked` 등)에 집중되지만 **원본 확장자의 다양성**이 높게 관찰됨. unzip/`npm install`은 다양성이 자연스럽게 높아 false negative 위험이 있으니 pid_fanout과 결합해 구분.
+> - `pid_fanout`: 정상 도구는 메인 PID + 자식 워커 소수(rsync는 단일 PID, npm은 자식 다수지만 패턴이 깊고 짧음). ransomware는 단일 PID에서 폭주적 IO를 하거나, 반대로 자식 분기·스레드 폭이 더 넓다 — 둘 다 정상 분포에서 이탈 신호.
 > 이 두 피처가 없으면 `write_rate` 단독 모델로 회귀해 AC5b FP를 통과하지 못한다.
 
 ### 6.6 [Day 7, 3h] 모델 학습 + `/classify` 본구현
@@ -537,7 +577,7 @@ def classify():
 
 **선행**: 측정 전에 서버가 떠 있어야 한다. 떠 있지 않으면 `requests.exceptions.ConnectionError`로 실패.
 ```bash
-cd python-engine && source .venv/Scripts/activate
+cd python-engine && source .venv/bin/activate
 python waitress_conf.py &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -645,11 +685,11 @@ $(cat /tmp/ac5.out)
 ## AC5a — held-out variant
 v3 = .pdf → .locked, 200 files/2s, **not in training set**.
 
-## AC5b — bursty-benign negatives
-robocopy /MIR, 7zip 압축 해제 로그.
+## AC5b — bursty-benign negatives (Ubuntu)
+rsync -aH --delete mirror, unzip/7z 압축 해제, git clone(large), npm install (node_modules 폭발) 로그.
 
 ## AC5c — disclaimer
-**Evaluated on synthetic PoC, not real-world malware.**
+**Evaluated on synthetic PoC, not real-world malware. Evaluated on Linux/ext4 + fanotify userspace collector; Windows NTFS/minifilter behavior may differ.**
 EOF
 git add docs/AC5-results.md scripts/eval-ac5.sh
 git commit -m "C: week8-9 AC5 eval script + AC5-results.md (honest reporting)"
@@ -657,7 +697,7 @@ git push
 ```
 
 ### 7.3 `scripts/eval-ac4.sh` — Rust tracing JSON → p99
-B가 emit한 `tracing` JSON 파일(`rust-service/logs/trace-*.json` 또는 stdout) 가정.
+B가 emit한 `tracing` JSON 파일(`rust-service/logs/trace-*.json` 또는 stdout) 가정. 입력 측 fanotify collector(A 영역)는 root로 실행되며 `fs.inotify.max_user_watches`·`fanotify` 큐 한계에 닿으면 이벤트를 silent drop할 수 있다. AC4 p99 산식은 도달한 이벤트만 계산하므로 누락된 요청은 통계에서 제외되어 tail latency가 실제보다 낙관적으로 측정될 수 있다. 측정 결과에 `n=<sample_count>`를 함께 기록해 평가자가 표본 충분성을 검증하도록 한다.
 
 `scripts/eval-ac4.sh`:
 ```bash
@@ -729,9 +769,10 @@ B 주관. C는 `REHEARSAL-LOG.md`에 자기 섹션(엔진 응답 시간, fallbac
 ### 8.1 슬라이드 — 데이터 전략 + AC5 결과 페이지
 필수 포함:
 - 합성 PoC v1/v2 (학습) vs v3 (held-out) 분리도
-- robocopy/7zip negative 워크로드 라벨
+- rsync/unzip/git-clone/npm-install negative 워크로드 라벨 (Ubuntu)
+- 4계층 다이어그램에서 layer ①이 **fanotify userspace collector**(원안 WDK minifilter에서 마이그레이션)임을 1줄 표기
 - `docs/AC5-results.md` 표 그대로 캡처
-- **AC5c disclaimer 굵게**: *"Evaluated on synthetic PoC, not real-world malware. Real-world testing is future work."*
+- **AC5c disclaimer 굵게**: *"Evaluated on synthetic PoC, not real-world malware. Evaluated on Linux/ext4 + fanotify userspace collector; Windows NTFS/minifilter behavior may differ. Real-world testing is future work."*
 
 > *(체크리스트)* AC5c disclaimer는 슬라이드 1곳만 두면 Q&A에서 캡처/공유 시 떨어져 나간다. **`README.md` 최상단, `docs/AC5-results.md` 본문, 발표 슬라이드, 데모 영상 자막**까지 동일 문구로 박아두면 어디서 잘려나가도 한 곳은 살아남는다.
 
@@ -777,7 +818,7 @@ Velxor/
 ├── datasets/
 │   ├── positive/v[12]_run_*.jsonl    ✅ (각 10개)
 │   ├── heldout/v3/v3_run_*.jsonl     ✅ (10개)
-│   └── negative/{robocopy,7zip}_*    ✅ (≥10개)
+│   └── negative/{rsync,unzip,7z,gitclone,npm_install}_*    ✅ (≥10개, Ubuntu)
 ├── scripts/
 │   ├── poc-bench.sh                  ✅ AC2
 │   ├── eval-ac4.sh                   ✅ AC4
@@ -811,11 +852,14 @@ Velxor/
 
 | 증상 | 원인 후보 | 즉시 조치 |
 |------|-----------|-----------|
-| `/health` 200 안 옴 | Waitress 미설치 / 포트 충돌 | `pip show waitress`, `netstat -ano \| grep 8765` |
+| `/health` 200 안 옴 | Waitress 미설치 / 포트 충돌 | `pip show waitress`; `ss -ltnp 'sport = :8765'` 또는 `lsof -iTCP:8765 -sTCP:LISTEN`; 종료는 `fuser -k 8765/tcp` |
 | `/classify` 503 | 모델 pickle 깨짐 | `_MODEL=None` 강제 → rule-based 영속 |
 | p99 > 100ms | 모델 추론 느림 / threads=4 미적용 | `serve(..., threads=4)` 확인, 모델을 logistic으로 단순화 |
 | AC5 TP<9 | held-out v3 변형이 학습 분포 밖 | **임계값 완화 금지**. 결과 그대로 슬라이드 |
-| AC5 FP>1 | robocopy burst가 write_rate 트리거 | features에 `pid_fanout`, `ext_diversity` 가중 (학습 데이터에 negative 추가) |
+| AC5 FP>1 | rsync/unzip/npm burst가 write_rate 트리거 | features에 `pid_fanout`, `ext_diversity` 가중 (학습 데이터에 npm-install 등 추가). `class_weight="balanced"`도 검토 |
+| `python3.11: command not found` | Ubuntu 24.04 기본 python3는 3.12 | `pyenv install 3.11.9` 또는 `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11 python3.11-venv` |
+| fanotify smoke 실패 (A 영역) | root 권한 부족, 커널 옵션 미활성 | `sudo` 로 실행 확인; `grep CONFIG_FANOTIFY /boot/config-$(uname -r)`가 `=y`인지 |
+| `chmod +x` 후에도 실행 안 됨 | git에 권한 비트 미반영 | `git update-index --chmod=+x scripts/foo.sh` 후 재커밋 |
 | `VELXOR_STUB=engine` 무효 | env 우선순위 무시 | `app.py` 최상단 `os.getenv` 분기 확인 |
 
 ---
