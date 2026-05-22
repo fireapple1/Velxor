@@ -5,6 +5,7 @@
 // inside `tokio::task::spawn_blocking` so the tokio runtime is never stalled.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nix::sys::fanotify::{
@@ -20,7 +21,7 @@ use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
 pub async fn run_fanotify(
     tx: broadcast::Sender<WsMessage>,
     replay: ReplayBuffer,
-    seq_start: u64,
+    seq: Arc<AtomicU64>,
 ) -> anyhow::Result<()> {
     // Build watch dir under $HOME/velxor-work (never /tmp — CLAUDE.md absolute rule).
     let work = std::env::var("VELXOR_WORK").unwrap_or_else(|_| {
@@ -52,13 +53,16 @@ pub async fn run_fanotify(
 
     tracing::info!(work, "fanotify watching mount");
 
+    // TODO(§4.7): Arc<Fanotify> smell — Fanotify fd should be owned by the
+    // spawn_blocking task exclusively; switch to a channel-based hand-off to
+    // avoid the Arc when nix gains Send on Fanotify directly.
     let fan = Arc::new(fan);
-    let mut seq: u64 = seq_start.max(1);
     let mut dropped_since_last: u32 = 0;
 
     loop {
-        // Blocking read of the fanotify fd happens inside spawn_blocking so the
-        // tokio reactor stays free for WS broadcast / classify_client work.
+        // TODO(§4.7): spawn_blocking cancellation — JoinHandle is currently
+        // dropped on tokio shutdown; add a CancellationToken so the blocking
+        // thread exits cleanly instead of being abandoned.
         let fan_clone = Arc::clone(&fan);
         let read_result = tokio::task::spawn_blocking(move || fan_clone.read_events()).await?;
 
@@ -72,7 +76,13 @@ pub async fn run_fanotify(
         };
 
         for ev in events {
+            // TODO(§4.7): fd exhaustion — fanotify event fds accumulate if we
+            // process faster than we drop; add a bounded channel or explicit
+            // drop checkpoint to bound open-fd count under high event rates.
+
             // Skip queue-overflow / version-mismatch noise; surface as warning.
+            // TODO(§4.7): check_version alert — consider emitting a structured
+            // metric/alert instead of a plain warn when this fires repeatedly.
             if !ev.check_version() {
                 tracing::warn!(
                     expected = nix::sys::fanotify::FANOTIFY_METADATA_VERSION,
@@ -82,31 +92,54 @@ pub async fn run_fanotify(
                 continue;
             }
 
-            let payload = build_payload(&ev, dropped_since_last);
+            // Fix 3: skip pid <= 0 (FAN_Q_OVERFLOW synthesizes pid=0; schema §1.2
+            // requires a real source PID).
+            if ev.pid() <= 0 {
+                tracing::warn!(pid = ev.pid(), "skip non-positive pid (FAN_Q_OVERFLOW or sentinel)");
+                continue;
+            }
+
+            // Fix 4: unknown mask → skip instead of mislabelling as FileWrite.
+            let event_type = match classify_event_type(ev.mask()) {
+                Some(t) => t,
+                None => {
+                    tracing::warn!(mask = ?ev.mask(), "skip event with unmatched mask");
+                    continue;
+                }
+            };
+
+            // Fix 2: build payload with current dropped_since_last snapshot, then
+            // attempt send first; reset/increment counter based on send result.
+            let s = seq.fetch_add(1, Ordering::Relaxed);
+            let payload = build_payload(&ev, dropped_since_last, s, event_type);
             let msg = WsMessage {
                 schema_version: "1.0".into(),
-                seq,
+                seq: s,
                 r#type: "node_add".into(),
                 payload,
             };
-            replay.push(msg.clone()).await;
-            if tx.send(msg).is_err() {
+
+            // schema §1.4: dropped_since_last carries the count at send-attempt time; ReplayBuffer guarantees presence regardless of broadcast subscriber state.
+            if tx.send(msg.clone()).is_ok() {
+                replay.push(msg).await;
+                if dropped_since_last > 0 {
+                    tracing::warn!(dropped_since_last, "broadcast lag");
+                    dropped_since_last = 0;
+                }
+            } else {
+                replay.push(msg).await;
                 dropped_since_last = dropped_since_last.saturating_add(1);
-            } else if dropped_since_last > 0 {
-                tracing::warn!(dropped_since_last, "broadcast lag");
-                dropped_since_last = 0;
             }
-            seq = seq.saturating_add(1);
         }
     }
 }
 
 /// Build a `BehaviorEventV1`-shaped JSON object from a fanotify event.
 /// Enriches with `/proc/<pid>/exe` (image_path) and `/proc/<pid>/status` PPid.
-fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32) -> serde_json::Value {
+/// `seq` mirrors the outer WsMessage.seq per schema §1.2.
+/// `event_type` is pre-classified by the caller to avoid double-computation.
+fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32, seq: u64, event_type: &str) -> serde_json::Value {
     let pid = ev.pid();
-    let mask = ev.mask();
-    let event_type = classify_event_type(mask);
 
     let image_path = read_proc_exe(pid);
     let parent_pid = read_proc_ppid(pid).unwrap_or(0);
@@ -129,7 +162,7 @@ fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32) -> serde_json::Val
 
     json!({
         "schema_version": "1.0",
-        "seq": null,  // outer WsMessage holds the canonical seq
+        "seq": seq,
         "dropped_since_last": dropped_since_last,
         "pid": pid as u32,
         "parent_pid": parent_pid,
@@ -140,17 +173,17 @@ fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32) -> serde_json::Val
     })
 }
 
-fn classify_event_type(mask: MaskFlags) -> &'static str {
+/// Returns `Some(event_type)` for known mask flags, `None` for unmatched masks.
+/// Schema enum is closed: {FileWrite, FileRename, ProcessCreate}.
+fn classify_event_type(mask: MaskFlags) -> Option<&'static str> {
     if mask.contains(MaskFlags::FAN_RENAME) {
-        "FileRename"
+        Some("FileRename")
     } else if mask.contains(MaskFlags::FAN_OPEN_EXEC) {
-        "ProcessCreate"
+        Some("ProcessCreate")
     } else if mask.contains(MaskFlags::FAN_MODIFY) || mask.contains(MaskFlags::FAN_CLOSE_WRITE) {
-        "FileWrite"
+        Some("FileWrite")
     } else {
-        // Default to FileWrite — keep the schema's enum total. Aggregator can
-        // ignore unknowns once it grows richer routing in §4.2.
-        "FileWrite"
+        None
     }
 }
 

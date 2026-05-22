@@ -15,3 +15,4 @@ futures-util = "0.3"
 anyhow = "1"
 url = "2"
 nix = { version = "0.31", features = ["signal", "process", "fanotify", "fs"] }
+libc = "0.2.186"

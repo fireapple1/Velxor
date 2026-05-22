@@ -1,23 +1,32 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
 
-pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer) -> anyhow::Result<()> {
+pub async fn run(
+    tx: broadcast::Sender<WsMessage>,
+    replay: ReplayBuffer,
+    seq: Arc<AtomicU64>,
+) -> anyhow::Result<()> {
     let mode = std::env::var("VELXOR_STUB").unwrap_or_default();
     if mode == "collector" || mode == "both" {
-        return poll_events_jsonl(tx, replay).await;
+        return poll_events_jsonl(tx, replay, seq).await;
     }
-    // Week 4-5 §4.1: real libfanotify adapter. Seq starts at 1 and is monotonic
-    // for the process lifetime (the adapter owns its own counter from here).
-    crate::fanotify_adapter::run_fanotify(tx, replay, 1).await
+    // Week 4-5 §4.1: real libfanotify adapter. Seq is globally monotonic via
+    // shared Arc<AtomicU64> owned by main.rs.
+    crate::fanotify_adapter::run_fanotify(tx, replay, seq).await
 }
 
-async fn poll_events_jsonl(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer) -> anyhow::Result<()> {
+async fn poll_events_jsonl(
+    tx: broadcast::Sender<WsMessage>,
+    replay: ReplayBuffer,
+    seq: Arc<AtomicU64>,
+) -> anyhow::Result<()> {
     let path_str = std::env::var("VELXOR_EVENTS_PATH").unwrap_or_else(|_| "events.jsonl".to_string());
     let path = Path::new(&path_str);
     let mut offset: u64 = 0;
-    let mut seq: u64 = 1;
     let mut dropped_since_last: u32 = 0;
     loop {
         if path.exists() {
@@ -38,9 +47,10 @@ async fn poll_events_jsonl(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffe
                 for line in complete.lines() {
                     if line.trim().is_empty() { continue; }
                     if let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) {
+                        let s = seq.fetch_add(1, Ordering::Relaxed);
                         let msg = WsMessage {
                             schema_version: "1.0".into(),
-                            seq,
+                            seq: s,
                             r#type: "node_add".into(),
                             payload: ev,
                         };
@@ -51,7 +61,6 @@ async fn poll_events_jsonl(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffe
                             tracing::warn!(dropped_since_last, "broadcast lag");
                             dropped_since_last = 0;
                         }
-                        seq += 1;
                     }
                 }
                 offset += consume_len as u64;

@@ -34,9 +34,11 @@ impl ReplayBuffer {
         self.inner.lock().await.iter()
             .filter(|(_, m)| m.seq > last_seq).map(|(_, m)| m.clone()).collect()
     }
-    #[allow(dead_code)]
     pub async fn head_seq(&self) -> u64 {
         self.inner.lock().await.back().map(|(_, m)| m.seq).unwrap_or(0)
+    }
+    pub async fn front_seq(&self) -> u64 {
+        self.inner.lock().await.front().map(|(_, m)| m.seq).unwrap_or(0)
     }
 }
 
