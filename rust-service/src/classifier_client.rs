@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex}; // std (not tokio) — no await held across lock, sub-µs ops
+use std::sync::{Arc, Mutex, OnceLock}; // std (not tokio) — no await held across lock, sub-µs ops
 use std::time::{Duration, Instant};
 
 const MAX_ENTRIES: usize = 4096;
@@ -77,19 +77,45 @@ pub async fn classify_with_cache(
     Ok(v)
 }
 
+/// Module-static reqwest client — `Client::builder()` triggers TLS init + DNS
+/// resolver setup which is non-trivial; in the hot path (every burst) we want
+/// to amortize that to once-per-process. 200ms timeout matches schema §2.3.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("reqwest::Client::build must succeed at startup")
+    })
+}
+
+/// Module-static classifier URL — env::var() is a syscall + heap alloc; cache
+/// at first access. VELXOR_CLASSIFIER_URL is read once per process lifetime.
+fn classify_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| {
+        std::env::var("VELXOR_CLASSIFIER_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8765/classify".to_string())
+    })
+}
+
+/// Eagerly initialize module statics at startup so any TLS / DNS resolver init
+/// failure surfaces at boot (panic in main) instead of first-burst spawn task
+/// (silent loss — JoinSet aborts the task). Called once from main.rs.
+pub fn init() {
+    let _ = http_client();
+    let _ = classify_url();
+}
+
 pub async fn classify(
     events: &[Arc<serde_json::Value>],
     window_ms: u32,
 ) -> anyhow::Result<serde_json::Value> {
-    let url = std::env::var("VELXOR_CLASSIFIER_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8765/classify".to_string());
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(200))
-        .build()?;
     let events_ref: Vec<&serde_json::Value> = events.iter().map(|a| a.as_ref()).collect();
     let body = serde_json::json!({ "events": events_ref, "window_ms": window_ms });
-    let resp = client
-        .post(&url)
+    let resp = http_client()
+        .post(classify_url())
         .json(&body)
         .send()
         .await?

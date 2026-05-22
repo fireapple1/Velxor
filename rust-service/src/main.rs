@@ -25,6 +25,10 @@ pub fn time_ms() -> u64 {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().json().with_env_filter("info").init();
 
+    // Eager init of classifier_client OnceLocks — TLS/DNS init 실패가 첫 burst
+    // 가 아닌 boot 에서 surface 되도록 (review followup).
+    classifier_client::init();
+
     let (tx, _rx) = broadcast::channel::<ws_broadcaster::WsMessage>(1024);
     let replay = ws_broadcaster::ReplayBuffer::new(std::time::Duration::from_secs(5));
 

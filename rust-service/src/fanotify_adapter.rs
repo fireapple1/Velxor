@@ -79,6 +79,9 @@ pub async fn run_fanotify(
     // it wraps); when `fan` is dropped at end-of-scope the underlying fd is closed.
     let async_fd = AsyncFd::new(fan.as_raw_fd())?;
     let mut dropped_since_last: u32 = 0;
+    // schema v1.1 §1.4: u32 포화 시 saturating_add 채택 + dropped_saturated bool
+    // 신호. send-with-reset 시 flag도 함께 false 로 reset.
+    let mut dropped_saturated: bool = false;
 
     loop {
         // readable().await is cancellation-safe: if the outer task is cancelled the
@@ -118,6 +121,10 @@ pub async fn run_fanotify(
                 "fanotify batch overflow — capping at {} events per iter",
                 MAX_EVENTS_PER_BATCH
             );
+            // v1.1 §1.4: 포화 검출 — saturating_add 이전에 u32 capacity 초과 여부 검사.
+            if (dropped_since_last as u64) + (overflow as u64) > u32::MAX as u64 {
+                dropped_saturated = true;
+            }
             dropped_since_last = dropped_since_last.saturating_add(overflow);
         }
 
@@ -171,7 +178,7 @@ pub async fn run_fanotify(
             let s = seq.fetch_add(1, Ordering::Relaxed);
             // AC4 §5.2: event_received_ts emit (real-fanotify path).
             tracing::info!(event_received_ts = crate::time_ms(), seq = s, src = "fanotify", "evt_in");
-            let payload = build_payload(&ev, dropped_since_last, s, event_type);
+            let payload = build_payload(&ev, dropped_since_last, dropped_saturated, s, event_type);
             let msg = WsMessage {
                 schema_version: "1.0".into(),
                 seq: s,
@@ -183,11 +190,16 @@ pub async fn run_fanotify(
             if tx.send(msg.clone()).is_ok() {
                 replay.push(msg).await;
                 if dropped_since_last > 0 {
-                    tracing::warn!(dropped_since_last, "broadcast lag");
+                    tracing::warn!(dropped_since_last, dropped_saturated, "broadcast lag");
                     dropped_since_last = 0;
+                    dropped_saturated = false;
                 }
             } else {
                 replay.push(msg).await;
+                // u32 포화 검출 — 1 증가 시도 시 capacity 초과면 saturated flag set.
+                if dropped_since_last == u32::MAX {
+                    dropped_saturated = true;
+                }
                 dropped_since_last = dropped_since_last.saturating_add(1);
             }
         }
@@ -198,10 +210,21 @@ pub async fn run_fanotify(
 /// Enriches with `/proc/<pid>/exe` (image_path) and `/proc/<pid>/status` PPid.
 /// `seq` mirrors the outer WsMessage.seq per schema §1.2.
 /// `event_type` is pre-classified by the caller to avoid double-computation.
-fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32, seq: u64, event_type: &str) -> serde_json::Value {
+/// v1.1 optional fields emitted when non-default:
+///   - `dropped_saturated: true` (default false) — u32::MAX 도달 신호
+///   - `image_path_resolved: false` (default true) — `<unknown:pid=N>` sentinel 시
+fn build_payload(
+    ev: &FanotifyEvent,
+    dropped_since_last: u32,
+    dropped_saturated: bool,
+    seq: u64,
+    event_type: &str,
+) -> serde_json::Value {
     let pid = ev.pid();
 
-    let image_path = read_proc_exe(pid);
+    // v1.1 §1.2: typed resolved 신호 — read_proc_exe 가 (path, resolved) 튜플
+    // 반환 (string-sniff 회피, 안전한 결합).
+    let (image_path, image_path_resolved) = read_proc_exe(pid);
     let parent_pid = read_proc_ppid(pid).unwrap_or(0);
 
     // file_path: resolve through /proc/self/fd/<event_fd> readlink. The event
@@ -220,7 +243,7 @@ fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32, seq: u64, event_ty
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    json!({
+    let mut payload = json!({
         "schema_version": "1.0",
         "seq": seq,
         "dropped_since_last": dropped_since_last,
@@ -230,7 +253,18 @@ fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32, seq: u64, event_ty
         "event_type": event_type,
         "file_path": file_path,
         "ts_unix_ms": ts_unix_ms,
-    })
+    });
+
+    // v1.1 optional 필드는 non-default 시에만 emit (bandwidth 절약 + consumer
+    // 호환: v1.0 consumer는 모르는 optional 필드 무시).
+    if dropped_saturated {
+        payload["dropped_saturated"] = json!(true);
+    }
+    if !image_path_resolved {
+        payload["image_path_resolved"] = json!(false);
+    }
+
+    payload
 }
 
 /// Returns `Some(event_type)` for known mask flags, `None` for unmatched masks.
@@ -246,13 +280,17 @@ fn classify_event_type(mask: MaskFlags) -> Option<&'static str> {
     }
 }
 
-/// Read `/proc/<pid>/exe` to recover the process image path. Returns the
-/// sentinel `"<unknown:pid=N>"` per Worker-A v1.1 note #4 when readlink fails
-/// (PID already exited, EACCES, etc.).
-fn read_proc_exe(pid: i32) -> String {
+/// Read `/proc/<pid>/exe` to recover the process image path. Returns
+/// `(image_path, resolved)`:
+///
+///   - 성공: `(real_path, true)`
+///   - 실패 (PID race / EACCES / 단명 PID): sentinel `("<unknown:pid=N>", false)`
+///
+/// `resolved` 가 caller 에 직접 노출되므로 string sniffing 불필요 (typed signal).
+fn read_proc_exe(pid: i32) -> (String, bool) {
     std::fs::read_link(format!("/proc/{pid}/exe"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| format!("<unknown:pid={pid}>"))
+        .map(|p| (p.to_string_lossy().into_owned(), true))
+        .unwrap_or_else(|_| (format!("<unknown:pid={pid}>"), false))
 }
 
 /// Parse `PPid:` from `/proc/<pid>/status`. Returns None when the file or the

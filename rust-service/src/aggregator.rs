@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -8,6 +8,14 @@ use tokio::task::JoinSet;
 
 use crate::classifier_client;
 use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
+
+/// VELXOR_AUTOBLOCK env::var() lookup is a syscall + heap alloc; called on
+/// every successful classify (hot path). Cache once per process — env is
+/// snapshot at startup, runtime toggling not supported.
+fn auto_block_enabled() -> bool {
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| std::env::var("VELXOR_AUTOBLOCK").is_ok())
+}
 
 const WINDOW_SECS: u64 = 5;
 const BURST_WINDOW_SECS: u64 = 1;
@@ -118,12 +126,18 @@ pub async fn run(
                         Some(last) => now.duration_since(*last) >= std::time::Duration::from_secs(CLASSIFY_DEBOUNCE_SECS),
                         None => true,
                     };
-                    // in-flight guard: skip if a classify is already running for this PID (fix I).
-                    let already_running = in_flight.lock().await.contains(&pid);
+                    // In-flight guard: 단일 lock acquisition 으로 contains+insert
+                    // (fix I). aggregator loop 자체는 single-task 라 race 없지만
+                    // check-then-act 패턴을 하나로 묶어 의도가 명확하도록.
+                    let proceed = if debounce_ok {
+                        let mut g = in_flight.lock().await;
+                        if g.contains(&pid) { false } else { g.insert(pid); true }
+                    } else {
+                        false
+                    };
 
-                    if debounce_ok && !already_running {
+                    if proceed {
                         last_classify_at.insert(pid, now);
-                        in_flight.lock().await.insert(pid);
 
                         let events = window.events_last_1s(now);
                         let tx2 = tx.clone();
@@ -144,8 +158,9 @@ pub async fn run(
                                     let ce = crate::time_ms();
                                     tracing::info!(classify_end_ts = ce, classify_start_ts = cs, latency_ms = ce.saturating_sub(cs), pid, n_arrived, "classify_done");
                                     // Fix B: auto-block when VELXOR_AUTOBLOCK is set and verdict=ransomware.
+                                    // env::var() 캐싱 (OnceLock) — hot path 마다 syscall 회피.
                                     if result.get("verdict") == Some(&serde_json::Value::String("ransomware".into()))
-                                        && std::env::var("VELXOR_AUTOBLOCK").is_ok()
+                                        && auto_block_enabled()
                                     {
                                         let block_result = crate::blocker::block_pid(pid as i32).await;
                                         let alert_s = seq2.fetch_add(1, Ordering::Relaxed);
