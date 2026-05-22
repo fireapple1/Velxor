@@ -4,7 +4,8 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 
 VELXOR_STUB = os.getenv("VELXOR_STUB", "")
-MODEL_VERSION = "stub-v1" if VELXOR_STUB == "engine" else "rule-based-v1"
+# both = collector stub + engine stub → engine 측도 stub 모드여야 의미상 일관
+MODEL_VERSION = "stub-v1" if VELXOR_STUB in ("engine", "both") else "rule-based-v1"
 
 @app.get("/health")
 def health():
