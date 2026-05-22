@@ -40,7 +40,7 @@ HEALTH_LOG="$OUT/health.tsv"
 echo "[ac7] duration=${DURATION}s  poll=${POLL}s  RSS_max=${RSS_MAX_PCT}%  failed_max=${FAILED_MAX}"
 echo "[ac7] artifacts: $OUT"
 
-# cleanup
+# cleanup — trap + initial 잔존 정리 양쪽에 동일 함수 사용
 EPID=""; RPID=""
 cleanup() {
   [ -n "$EPID" ] && kill "$EPID" 2>/dev/null || true
@@ -50,11 +50,7 @@ cleanup() {
   pkill -u "$USER" -f 'python-engine/.venv/bin/python.*waitress_conf' 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-
-# 잔존 정리
-pkill -u "$USER" -f 'rust-service/target/release/rust-service' 2>/dev/null || true
-pkill -u "$USER" -f 'python-engine/.venv/bin/python.*waitress_conf' 2>/dev/null || true
-sleep 0.5
+cleanup
 
 # events.jsonl 60 burst (sustained 동안 polling 으로 stub 모드 트리거 유지)
 [ -f "$ROOT/events.jsonl" ] || python3 -c "
