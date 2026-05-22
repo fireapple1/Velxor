@@ -1,15 +1,70 @@
-/* 새로운 사이버펑크용 핏빛 위협 애니메이션으로 교체 */
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  background: #0a0a0c;
+  color: #00ffcc;
+  font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  height: 100%;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 @keyframes pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(255, 51, 51, 0.7);
     border-color: #ff3333;
   }
   50% {
-    box-shadow: 0 0 20px 10px rgba(255, 51, 51, 0);
+    box-shadow: 0 0 24px 12px rgba(255, 51, 51, 0);
     border-color: #ff8888;
   }
   100% {
     box-shadow: 0 0 0 0 rgba(255, 51, 51, 0);
     border-color: #ff3333;
   }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.velxor-node-killed {
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+}
+
+/* xyflow Controls 다크 테마 오버라이드 */
+.react-flow__controls {
+  background: #0d0d11 !important;
+  border: 1px solid #00ffcc33 !important;
+}
+.react-flow__controls-button {
+  background: #1a1a1a !important;
+  border-bottom: 1px solid #00ffcc33 !important;
+  color: #00ffcc !important;
+  fill: #00ffcc !important;
+}
+.react-flow__controls-button:hover {
+  background: #2a2a2a !important;
+}
+.react-flow__controls-button svg {
+  fill: #00ffcc !important;
+}
+
+.react-flow__attribution {
+  background: transparent !important;
+  color: #00ffcc55 !important;
+}
+.react-flow__attribution a {
+  color: #00ffcc99 !important;
 }
