@@ -250,7 +250,7 @@ A 의 `blocker.rs` (axum :7001) `POST /block/{pid}`:
 | AC1 | walking skeleton — run-all + ws-record PASS, 3인 재현, `walking-skeleton-v1` tag | A·C 환경 PASS, **tag push 대기** | scripts/run-all.sh, ws-record.sh |
 | AC2 | 300 ops wall-clock < 1 s (PoC throughput) | PASS (perf_counter, simulate AC2_MEASURED_MS) | scripts/poc-bench.sh |
 | AC3 | UI 첫 frame ≤ 1 s + OBS evidence | B 영역, A 가 위임 받아 진행 | ui/, docs/AC3-evidence/ |
-| AC4 | classify p99 < 100 ms | **A 의 실 trace 캡처 후 측정 대기** | scripts/eval-ac4.{sh,py} |
+| AC4 | classify p99 < 100 ms | **PASS — 6 ms (3 iter, n_arrived=50)** | scripts/eval-ac4.{sh,py}, AC4-results.md |
 | AC5 | held-out TP ≥ 9/10, FP ≤ 1/10 | **PASS (10/10, 0/10)** | scripts/eval-ac5.{sh,py}, AC5-results.md |
 | AC5c | "synthetic PoC" disclaimer | PASS (AC5-results §0, ARCHITECTURE §6) | — |
 | AC6 | SIGTERM → 200 ms → SIGKILL 검증 | A 환경 PASS (pid 311061 terminated) | scripts/ac6-verify-block.sh |
