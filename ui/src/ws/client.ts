@@ -43,6 +43,11 @@ export function useVelxorWs(
         }
         if (typeof m.seq !== "number" || m.seq <= lastSeq) return;
         lastSeq = m.seq;
+        // gap 발생 시 server 가 다음 emit 부터 새 seq 를 보낸다는 가정 대신
+        // payload.to 로 명시적 점프 — 5초 replay 윈도우 외 데이터 손실 후 sync 보장
+        if (m.type === "gap" && typeof m.payload?.to === "number") {
+          lastSeq = m.payload.to;
+        }
         onMessageRef.current(m);
       };
 
@@ -53,7 +58,8 @@ export function useVelxorWs(
         backoff = Math.min(backoff * 2, 5000);
       };
 
-      ws.onerror = () => {
+      ws.onerror = (e) => {
+        console.warn("[velxor-ws] error", e);
         ws?.close();
       };
     };

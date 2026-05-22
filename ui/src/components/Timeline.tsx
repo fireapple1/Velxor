@@ -31,29 +31,31 @@ export function Timeline({ events, width = 800, height = 60 }: Props) {
       .domain([new Date(start), new Date(now)])
       .range([20, width - 20]);
 
-    // 축
-    const axis = svg.selectAll<SVGGElement, null>("g.axis").data([null]);
-    const axisEnter = axis.enter().append("g").attr("class", "axis").attr("transform", `translate(0, ${height - 18})`);
-    const axisMerged = axisEnter.merge(axis as d3.Selection<SVGGElement, null, null, undefined>);
-    axisMerged.call(
+    // 축: 매번 selectAll().remove() 로 재생성 (60 height 작은 SVG라 비용 무시 가능)
+    svg.selectAll("g.axis").remove();
+    const axisG = svg
+      .append("g")
+      .attr("class", "axis")
+      .attr("transform", `translate(0, ${height - 18})`);
+    axisG.call(
       d3
-        .axisBottom(x)
+        .axisBottom<Date>(x)
         .ticks(5)
         .tickFormat((d) => d3.timeFormat("%H:%M:%S")(d as Date)),
     );
-    axisMerged.selectAll("path, line").attr("stroke", "#00ffcc55");
-    axisMerged.selectAll("text").attr("fill", "#00ffcc99").attr("font-family", "monospace").attr("font-size", 10);
+    axisG.selectAll("path, line").attr("stroke", "#00ffcc55");
+    axisG
+      .selectAll("text")
+      .attr("fill", "#00ffcc99")
+      .attr("font-family", "monospace")
+      .attr("font-size", 10);
 
-    // 점
-    const dots = svg
+    // 점: join 패턴으로 enter/update/exit 일괄 처리
+    svg
       .selectAll<SVGCircleElement, TimelineEvent>("circle.evt")
-      .data(visible, (_, i) => `${visible[i]?.ts}-${visible[i]?.type}-${i}`);
-
-    dots
-      .enter()
-      .append("circle")
+      .data(visible)
+      .join("circle")
       .attr("class", "evt")
-      .merge(dots as d3.Selection<SVGCircleElement, TimelineEvent, SVGSVGElement, unknown>)
       .attr("cx", (e) => x(new Date(e.ts)))
       .attr("cy", 24)
       .attr("r", (e) => (e.type === "verdict" && e.verdict === "ransomware" ? 5 : 3))
@@ -69,8 +71,6 @@ export function Timeline({ events, width = 800, height = 60 }: Props) {
           ? "drop-shadow(0 0 4px #ff3333)"
           : "none",
       );
-
-    dots.exit().remove();
   }, [events, width, height]);
 
   return (
