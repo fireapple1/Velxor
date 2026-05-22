@@ -1,1 +1,3 @@
-scripts/run-all.sh: 줄 60: cargo: 명령어를 찾을 수 없음
+   Compiling rust-service v0.1.0 (/home/lsy/htA/Velxor/rust-service)
+    Finished `release` profile [optimized] target(s) in 3.61s
+     Running `target/release/rust-service`
