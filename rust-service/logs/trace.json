@@ -1,3 +1,1 @@
-    Finished `release` profile [optimized] target(s) in 0.08s
-     Running `target/release/rust-service`
-Error: EPERM: Operation not permitted
+./scripts/run-all.sh: line 60: cargo: command not found
