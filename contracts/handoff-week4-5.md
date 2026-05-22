@@ -149,24 +149,40 @@ UI_PID=$!
 
 ---
 
-## 8. 알려진 deferred TODO (Week 8-9 / §4.7 stress 전 처리)
+## 8. deferred TODO 상태 (2026-05-23 갱신 — Week 8-9 §5 close 후)
 
-| 위치 | TODO | 영향 |
+### 8.1 ✅ 닫힌 항목 (commit a8c936f / adfbe20 / 543eccb / cfe7efa)
+
+| 위치 | TODO | 닫힌 commit |
 |---|---|---|
-| `ws_broadcaster.rs:80` | snapshot 3 lock 통합 → `ReplayBuffer::snapshot()` | gap 페이로드 정확성 |
-| `ws_broadcaster.rs:133` | Lagged 시 gap emit 또는 disconnect | 클라이언트 누락 검출 불가 |
-| `fanotify_adapter.rs:55,63,79,84` | Arc smell / cancel-leak / fd exhaustion / version-mismatch alert | 스트레스 안정성 |
-| `aggregator.rs` | HashMap unbounded, classify task leak, debounce response-time, payload Arc | 장시간 운영 |
-| `classifier_client.rs:6,7` | cache eviction sweep + size bound | PID churn 누적 |
-| `blocker.rs:42` | pidfd_open race-free | pid recycling 방어 |
-| `blocker.rs:82` | VELXOR_BLOCK_TOKEN 인증 헤더 | block endpoint 보호 |
-| `blocker.rs:88` | ConcurrencyLimitLayer 16 | 동시 block 폭주 방어 |
+| `ws_broadcaster.rs` | snapshot 3 lock → `ReplayBuffer::snapshot()` 단일 acquisition | `a8c936f` |
+| `ws_broadcaster.rs` | broadcast Lagged 시 synthetic gap emit | `a8c936f` |
+| `fanotify_adapter.rs` | AsyncFd + JoinSet + 256 cap + version-mismatch alert | `a8c936f` |
+| `aggregator.rs` | HashMap 30s prune + JoinSet abort + 1s debounce + in_flight guard + Arc payload | `a8c936f` |
+| `classifier_client.rs` | VerdictCache MAX_ENTRIES + LRU evict + 30s sweep | `a8c936f` |
+| `classifier_client.rs` | reqwest Client OnceLock 캐시 + URL 캐시 (hot path 최적화) | `(audit followup)` |
+| `aggregator.rs` | VELXOR_AUTOBLOCK env::var OnceLock 캐시 + in_flight single-lock | `(audit followup)` |
+| `blocker.rs` | pidfd_open race-free + Pidfd RAII (fallback ENOSYS) | `a8c936f` |
+| `blocker.rs` | VELXOR_BLOCK_TOKEN 헤더 + 빈 토큰 거부 | `a8c936f` |
+| `blocker.rs` | ConcurrencyLimitLayer 16 (tower) | `a8c936f` |
+| `blocker.rs` | `impl Display for BlockResult` (회귀 fix, alert message 직렬화) | `adfbe20` |
+| `fanotify_adapter.rs` | FAN_RENAME mask 제거 (EINVAL 회피 — FID class 미요구) | `8713352` |
+| AC4 tracing | `event_received_ts` / `ws_sent_ts` / `classify_start_ts` / `classify_end_ts` / `n_arrived` / `latency_ms` emit | `adfbe20` |
+| AC6 verifier | `scripts/ac6-verify-block.sh` (POST /block/{pid} → kill -0 ESRCH) | `543eccb` |
+| AC8 wrap | `scripts/ac8-stub-smoke.sh` (collector + both 자동화) | `543eccb` |
+| §5.3 리허설 | `scripts/rehearsal.sh` 3 iter + `docs/AC-rehearsal-report-2026-05-23.md` | `45c842b` |
+| v1.1 emit | `dropped_saturated` + `image_path_resolved` optional 필드 (sentinel 시) | `(audit followup)` |
 
-위 항목 다수는 §4.7 sweep + 후속 deferred-TODO 일괄 소화 (commit `a8c936f`)에서 이미 해소됨. 잔여 2건 (blocker.rs 토큰 비교 timing-safe, aggregator.rs broadcast lag 측정)은 의도적 defer.
+### 8.2 ⏳ 잔여 (의도 defer)
 
-§4.7 sweep 시 FAN_RENAME mask는 init flag로 `FAN_REPORT_FID/DIR_FID/DFID_NAME` 중 하나를 요구함이 확인되어 EINVAL이 발생, mask에서 제거함. **FileRename 감지는 v1.1 schema collation 합의 (2026-05-24) 시 FAN_REPORT_DFID_NAME class 전환과 함께 본격 구현 예정.** event metadata layout 전체 재작성 필요 (no per-event fd, name이 `FAN_EVENT_INFO_TYPE_*`로 전달).
+| 위치 | TODO | 사유 | 회수 시점 |
+|---|---|---|---|
+| `blocker.rs:166` | 토큰 비교 timing-safe (`subtle::ConstantTimeEq`) | demo 데모용 가벼움. Loopback only가 1차 방어. | 데모 후 prod hardening |
+| `aggregator.rs::run()` Lagged arm | broadcast lag 시 windows 카운터 undercount 측정 | §4.7 stress lag undercount 측정 후 결정 | Week 8-9 후속 stress test |
+| `fanotify_adapter.rs` | FileRename 본격 구현 (FAN_REPORT_DFID_NAME class 전환) | event metadata layout 전체 재작성 필요. v1.1 schema 합의 후. | v1.1 collation 후 별도 PR |
+| `fanotify_adapter.rs` | FAN_MARK_MOUNT → per-dir filter (스코프 좁히기) | 데모용 시연 mark는 mount 전체 OK (6000 ev/s 노이즈 인지) | 데모 후 또는 stress 측정 시 |
 
-Week 8-9 §5 (자동 차단 + tracing instrumentation + 리허설)에서 다수 해소 예정.
+§4.7 sweep 시 FAN_RENAME mask는 init flag로 `FAN_REPORT_FID/DIR_FID/DFID_NAME` 중 하나를 요구함이 확인되어 EINVAL이 발생, mask에서 제거함. event metadata layout 전체 재작성 필요 (no per-event fd, name이 `FAN_EVENT_INFO_TYPE_*`로 전달) — v1.1 schema collation 후 별도 PR로 진행.
 
 ---
 

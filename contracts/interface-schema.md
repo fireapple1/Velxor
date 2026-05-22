@@ -319,6 +319,8 @@ UI(B)의 끊김·재접속 시 5초 이내 손실 메시지 복원 보장.
 
 **모든 변경은 additive only** — 기존 v1.0 필드의 type 변경 / rename / 삭제 없음. v1.0 클라이언트는 v1.1 메시지를 그대로 디코드 가능 (모르는 optional 필드는 무시).
 
+**참고 — v1.0 부터 존재한 type**: §3.2 의 `node_add` / `node_update` / `verdict` / `alert` / `gap` 5종은 모두 v1.0 (Week 1 draft) 부터 정의됨. v1.1 에서는 §3.2 본문에 `verdict` 행에 `+ {pid} 주입` 명시화 1건만 추가 (commit `cfe7efa` aggregator 의 emit 동작 문서화, schema 의미 변경 아님). 신규 type 추가 0건.
+
 ### 9.1 v1.1 발행 직후 자체 PR (A 알림 받음, C 수행)
 
 | # | 작업 | 파일 | DRI |
