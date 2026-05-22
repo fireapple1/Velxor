@@ -1,3 +1,44 @@
 - 필드명: payload.evidence_v2
 - 이유 (현재 schema에서 누락이거나 잘못된 이유): 기존 string 배열 형태의 evidence는 i18n, 중요도 강조, 링크 부착 등 UI 디테일 패널 구현 시 활용하기가 어렵습니다.
 - additive 제안 (새 optional 필드 형태로 추가, 기존 필드 type 변경 금지): { key: string, value: string, severity?: number }[] 형태의 새 optional 필드 추가를 제안합니다.
+
+
+
+
+
+
+
+[세부 색상 및 컴포넌트 디자인 가이드]
+
+전체 배경 (Background): Deep Black (#0a0a0c) 및 Dark Charcoal (#0d0d11)
+
+시각적 피로도를 낮추고, 위협 발생 시 빨간색 경고등이 가장 돋보일 수 있도록 완전한 암전 상태를 기본 베이스로 합니다.
+
+일반 프로세스 노드 및 텍스트 (Normal State): Neon Cyan (#00ffcc) 및 Gray (#666666)
+
+정상적인 프로세스 트리와 레이아웃 선(Border)은 차가운 청록색 계열로 렌더링됩니다.
+
+시스템 폰트는 Monospace를 적용하여 리눅스 터미널 콘솔을 직접 보는 듯한 느낌을 줍니다.
+
+위협 프로세스 노드 (Threat State): Neon Red (#ff3333) 및 Crimson (#1a0505)
+
+엔진에서 랜섬웨어 판정이 내려지는 순간, 프로세스 노드와 엣지(연결선)가 즉시 핏빛 붉은색으로 변환됩니다.
+
+[데이터 기반 시각화 및 애니메이션 연출 (A의 WS 메시지 연동)]
+A가 WebSockets(:7000)를 통해 전송하는 JSON 페이로드에 따라 다음과 같은 UI 연출이 1초 이내에 즉각 발동됩니다.
+
+node_add 이벤트 발생 시:
+
+화면 좌측 중앙 Process Tree에 어두운 배경(#2a2a2a)을 가진 노드가 조용히 배치됩니다.
+
+하단 위협 타임라인(Timeline) 그래프에 평범한 회색 점(Dot)이 찍힙니다.
+
+verdict: "ransomware" 판정 수신 시 (★ 핵심 데모 모먼트):
+
+Pulse Animation: 노드 색상만 변하는 것이 아니라, 해당 노드에 @keyframes pulse CSS 애니메이션이 가동됩니다. rgba(255, 51, 51, 0.7)의 붉은 광선 베일(box-shadow)이 심장 박동처럼 0.8초 주기로 강렬하게 점멸합니다.
+
+Detail Panel 슬라이드: 우측 패널에 A와 C가 넘겨준 confidence 수치 및 evidence 데이터가 붉은색 폰트로 출력되며 위협의 근거를 시각화합니다.
+
+POST /block/{pid} 호출 및 killed / terminated 응답 수신 시:
+
+붉게 점멸하던 노드가 즉시 애니메이션을 멈추고 Dark Gray (#444)의 무채색으로 굳어버리며(Dead State), 해당 위협이 성공적으로 차단되었음을 직관적으로 증명합니다.
