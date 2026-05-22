@@ -20,6 +20,9 @@
 #   - dropped_since_last >0 발생 라인 수
 #   - reconnect: client #2 가 #1 의 마지막 seq+1 부터 backlog 받음 여부
 #   - dedupe: client #2 캡처에 last_seq 이하 seq 가 없음 (서버 측 dedupe 검증)
+#
+# `set -e` 미사용: 회별 PASS/FAIL accumulate + iter 별 측정값 수집이 목적이라
+# 한 iter 실패가 다음 iter / 보고서 생성을 막으면 안 됨. trap cleanup 으로 leak 방지.
 
 set -uo pipefail
 

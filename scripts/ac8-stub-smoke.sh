@@ -13,6 +13,9 @@
 #   3. scripts/ws-record.sh exit 0 (node_add + FileWrite 매칭)
 #
 # Owner: A (CLAUDE.md AC8 wrap)
+#
+# `set -e` 미사용: 모드별 explicit pass/fail accumulate (OVERALL 결과 산출용).
+# -e 가 있으면 첫 mode FAIL 시 second mode 검증 skip → CI 가시성 저하.
 
 set -uo pipefail
 

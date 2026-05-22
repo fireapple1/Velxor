@@ -10,6 +10,9 @@
 #   - 또는 VELXOR_RUST_AUTOSTART=1 시 본 스크립트가 직접 띄움
 #
 # Owner: A (rust-service DRI)
+#
+# `set -e` 미사용: 회별 단계마다 explicit return code check + trap cleanup
+# 으로 partial-failure 복구. -e 가 있으면 cleanup 직전에 die 해서 좀비 leak.
 
 set -uo pipefail
 
