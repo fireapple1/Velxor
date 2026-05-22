@@ -71,12 +71,45 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer, port: u
                 Ok(w) => w,
                 Err(e) => { tracing::warn!("ws handshake error: {e}"); return; }
             };
-            // TODO(week4-5 §4.4): subscribe BEFORE snapshot to close T1<T2<T3 race
-            //   between replay.since() and tx.subscribe(); dedupe overlap by seq.
-            // TODO(week4-5 §4.4): if front_seq > last_seq + 1 && last_seq > 0, emit
-            //   {type:"gap", from:last_seq+1, to:head_seq} per schema §4.3.
-            // Send replay backlog first
+            // Subscribe FIRST so no live message is missed between snapshot and subscribe (race-free).
+            // Any message produced between subscribe (T1) and snapshot (T2) enters both rx and the
+            // replay buffer; the live loop dedupes by seq against backlog_max_seq.
+            let mut rx = tx2.subscribe();
+
+            // Snapshot replay after subscribing so we can detect eviction gaps.
+            // TODO(§4.7 stress): three separate lock acquisitions; producer may push between
+            //   them so head_seq in gap payload could exceed actual backlog tail. Combine into
+            //   one ReplayBuffer::snapshot(last_seq) -> (Vec<WsMessage>, front, head).
             let backlog = rep2.since(last_seq).await;
+            let front_seq = rep2.front_seq().await;
+            let head_seq = rep2.head_seq().await;
+
+            // Gap detection (schema §4.3): if the buffer's oldest surviving message is beyond
+            // last_seq+1, then messages were evicted (5s TTL) before this client could replay them.
+            // Emit a synthetic gap meta-message (seq=0, out-of-band) so the UI can full-refresh.
+            if last_seq > 0 && front_seq > last_seq + 1 {
+                let gap = WsMessage {
+                    schema_version: "1.0".into(),
+                    // seq=0 signals an out-of-band meta-message; not part of the monotonic sequence.
+                    seq: 0,
+                    r#type: "gap".into(),
+                    payload: serde_json::json!({
+                        "from": last_seq + 1,
+                        "to": head_seq,
+                    }),
+                };
+                match serde_json::to_string(&gap) {
+                    Ok(json) => {
+                        if ws.send(Message::Text(json.into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) => { tracing::warn!("gap serialize error: {e}"); }
+                }
+            }
+
+            // Send replay backlog (messages with seq > last_seq).
+            let backlog_max_seq = backlog.last().map(|m| m.seq).unwrap_or(last_seq);
             for msg in backlog {
                 if let Ok(json) = serde_json::to_string(&msg)
                     && ws.send(Message::Text(json.into())).await.is_err()
@@ -84,11 +117,16 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer, port: u
                     return;
                 }
             }
-            // Forward live broadcast messages
-            let mut rx = tx2.subscribe();
+
+            // Forward live broadcast messages. Skip any seq already covered by the backlog
+            // to dedupe messages that entered both rx and replay between T1 and T2.
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
+                        if msg.seq <= backlog_max_seq {
+                            // Already sent via replay; skip to avoid duplicate.
+                            continue;
+                        }
                         if let Ok(json) = serde_json::to_string(&msg)
                             && ws.send(Message::Text(json.into())).await.is_err()
                         {
@@ -96,6 +134,9 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer, port: u
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        // TODO(§4.7 stress): Lagged silently drops n messages from this client's
+                        //   view — no gap meta-message is emitted, so client believes stream is
+                        //   contiguous. Emit a gap WsMessage or disconnect to force reconnect.
                         tracing::warn!(n, "ws client lagged");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
