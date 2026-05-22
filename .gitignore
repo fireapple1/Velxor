@@ -35,3 +35,4 @@ CLAUDE.md
 
 /target
 events.jsonl
+rust-service/logs/

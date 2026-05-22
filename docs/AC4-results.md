@@ -30,9 +30,11 @@
 
 ---
 
-## 2. 결과 (3 iter, classify event 합산)
+## 2. 결과
 
-`scripts/eval-ac4.sh` 출력 합산:
+### 2.1 Single-PID rehearsal trace (n = 3)
+
+`scripts/eval-ac4.sh ~/velxor-work/rehearsal-2026-05-23/iter-{1,2,3}/rust.log`:
 
 | iter | classify n | failed | latency_ms p50 | p99 | event→ws n | p99 (ms) |
 |---|---|---|---|---|---|---|
@@ -41,10 +43,36 @@
 | 3 | 1 | 0 | 6.00 | 6.00 | 60 | 54 |
 | **합산** | **3** | **0** | **6.00** | **6.00** | **180** | **265** |
 
-- **AC4 classify p99 < 100 ms**: **PASS** (6 ms — 게이트 대비 16× 여유)
-- **event → ws p99 < 1000 ms**: **PASS** (max 265 ms — 게이트 대비 3.7× 여유)
-- failed_ratio: 0/3 (timeout / 예외 0건)
-- `n_arrived` per classify: 50 (FileWrite ≥ 50/1s burst threshold 그대로)
+### 2.2 Multi-PID burst trace (n = 10, 표본 보강)
+
+`scripts/multi-pid-burst.sh` → `rust-service/logs/multi-pid-trace.json`
+→ `scripts/eval-ac4.sh rust-service/logs/multi-pid-trace.json`:
+
+```
+n=10  failed=0  failed_ratio=0.000
+p50=3.00ms  p95=13.00ms  p99=13.00ms  max=13.00ms
+AC4 classify : PASS
+```
+
+10 PID × 50 events 합성 → aggregator.PidWindow 가 PID 별 burst threshold
+(FileWrite ≥ 50/1s) 모두 트리거 → classify 10 회 발생 (verdict cache TTL
+1 s × 10 PID 분리).
+
+event→ws 페어는 0 — multi-pid-burst.sh 가 WS subscriber 미연결이라
+`ws_out` tracing emit 자체가 안 됨. 게이트 자체에는 무관 (event→ws 는 보조).
+
+### 2.3 합산 (n = 13)
+
+| 출처 | classify n | failed | p99 latency_ms |
+|---|---|---|---|
+| rehearsal 3 iter | 3 | 0 | 6 |
+| multi-PID burst | 10 | 0 | 13 |
+| **합산** | **13** | **0** | **13** |
+
+- **AC4 classify p99 < 100 ms**: **PASS** (13 ms — 게이트 대비 7.7× 여유)
+- **event → ws p99 < 1000 ms**: **PASS** (rehearsal max 265 ms — 게이트 대비 3.7× 여유)
+- failed_ratio: 0 / 13 (timeout / 예외 0 건)
+- `n_arrived` per classify: 50 (FileWrite burst threshold 그대로)
 
 원시 line 한 줄 (iter-1 예시):
 ```json
@@ -58,32 +86,25 @@
 
 ## 3. 표본 크기 한계 (honest reporting)
 
-### 3.1 classify 표본이 작은 이유
+### 3.1 표본 규모 — n = 13 (rehearsal 3 + multi-PID 10)
 
-iter 당 classify event **1 건만 발생**. 원인 명확:
-- A 의 aggregator 가 *PID 별* verdict cache TTL 1 초 + 1 초 debounce 적용
-  (consensus-plan §3.3, handoff-week4-5 §5)
-- rehearsal.sh 의 60 burst event 가 **모두 pid=1234 단일** → cache 1 회 trigger
-- 60 events 가 ~3 ms 안에 다 들어왔으므로 후속 events 는 debounce 로 흡수
+원본 rehearsal 3 iter (single-PID 60 burst) 는 verdict cache TTL 1 s + 1 s
+debounce 로 classify 1 회만 trigger 했음. 표본 보강 위해
+`scripts/multi-pid-burst.sh` 가 10 PID × 50 events 합성 → PID 별 cache 우회
+→ classify 10 회 발생.
 
-→ AC4 sub-budget (classifier 응답 시간) 자체는 측정 충분 (6 ms × 3 회 모두
-동일, std≈0). 하지만 **classifier 처리량 / tail latency 분포 정밀 측정에는
-n=3 너무 작음**.
+n = 13 으로도 **AC4 게이트 PASS 는 견고** (p99 = 13 ms vs 게이트 100 ms,
+7.7× 여유). 그러나 통계적 power 측면에서 추가 표본이 바람직.
 
 ### 3.2 추가 측정 권장 (Future work)
 
-큰 표본 확보 방안 (예상 trace 양 함께):
-
 | 시나리오 | 예상 classify n | 비고 |
 |---|---|---|
-| Multi-PID burst (10 PID × 60 events) | 10 / iter | cache TTL 우회 |
-| 시간 흐름 burst (1 PID, 1초 간격 × 10초) | 10 / iter | TTL 만료 후 재 classify |
-| 실 fanotify trace (`sweep-fanotify.sh`) | 6 / 6 초 (이미 §4.7 sweep) | multi-PID 자연스럽게 발생 |
-| `scripts/p99-bench.py` 자체 측정 100 회 | 100 | engine 측 단독 (warmup 5 + measure 100) |
-
-본 보고서는 3 iter 결과만으로 AC4 게이트 PASS 를 확정 — latency_ms=6 가
-3 회 모두 동일하므로 분산 매우 작다고 추정. 더 큰 표본은 발표 직전
-리허설 + `p99-bench.py` 실측으로 보강 예정.
+| ITER=10 rehearsal | 10 (1/iter × 10) | tested 코드 경로 |
+| multi-PID 100 PID × 50 events | 100 | 본 스크립트 N_PIDS 만 조정 |
+| 시간 흐름 burst (1 PID, 1 s 간격 × N s) | N | TTL 만료 후 재 classify |
+| 실 fanotify trace (`sweep-fanotify.sh`) | 6 / 6 초 (이미 §4.7 sweep) | multi-PID 자연스럽게 |
+| `scripts/p99-bench.py` 자체 측정 100 회 | 100 | engine 단독 (warmup 5 + measure 100) |
 
 ### 3.3 자체 측정 (`scripts/p99-bench.py`) 미실행 사유
 

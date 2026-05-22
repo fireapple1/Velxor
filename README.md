@@ -44,7 +44,21 @@ VM에서 합성 PoC 실행 → 좌측 프로세스 트리 노드가 빨갛게 �
 
 ## Status
 
-🟡 **계획 단계** — `velxor-consensus-plan.md`가 `pending approval` 상태. 코드 작성은 명시적 실행 승인 이후 시작.
+🟢 **Walking Skeleton + AC2/4/5/6/7/8 PASS** (2026-05-23, `walking-skeleton-v1` tag).
+
+| AC | 검증 | 결과 |
+|---|---|---|
+| AC1 | `git tag walking-skeleton-v1` + `scripts/ws-record.sh` | PASS |
+| AC2 | `bash scripts/poc-bench.sh` (300 ops < 1 s) | PASS |
+| AC3 | UI 1 s frame (A 위임) | UI 영역 |
+| AC4 | classify p99 < 100 ms — `bash scripts/eval-ac4.sh` | PASS (6 ms) |
+| AC5 | held-out TP ≥ 9/10, FP ≤ 1/10 — `bash scripts/eval-ac5.sh` | PASS (10/0) |
+| AC6 | SIGTERM→200 ms→SIGKILL — `bash scripts/ac6-verify-block.sh` | PASS |
+| AC7 | sustained run (dev 5 m / release 1 h) — `bash scripts/ac7-sustained.sh` | PASS (5 m dev) |
+| AC8 | stub 3-mode sweep — `bash scripts/ac8-stub-smoke.sh` | PASS |
+
+마스터 검증: `bash scripts/verify-success.sh` 가 13 게이트 일괄 평가.
+설계 문서: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · AC 결과: [`docs/AC4-results.md`](./docs/AC4-results.md) / [`docs/AC5-results.md`](./docs/AC5-results.md) / `docs/AC7-results.md`.
 
 ## 한계 / Future Work
 
