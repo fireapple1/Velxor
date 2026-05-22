@@ -29,34 +29,31 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# simulate.py 의 dst_ext 는 풀에서 random — gen 측은 stdout 의 DST_EXT 라인을 읽어 glob.
+# src_ext 는 simulate 가 사전 생성하는 source 파일 확장자 (rename 전).
 VARIANT_RULES = {
     "v1": {
         "simulate": REPO_ROOT / "poc-samples/ransomware_simulator/v1/simulate.py",
-        "dst_glob": "*.docx.enc",
         "src_ext": ".docx",
-        "dst_ext": ".docx.enc",
         "default_count": 300,
         "out_dir": REPO_ROOT / "datasets/positive",
     },
     "v2": {
         "simulate": REPO_ROOT / "poc-samples/ransomware_simulator/v2/simulate.py",
-        "dst_glob": "*.crypted",
         "src_ext": ".txt",
-        "dst_ext": ".crypted",
         "default_count": 500,
         "out_dir": REPO_ROOT / "datasets/positive",
     },
     "v3": {
         "simulate": REPO_ROOT / "poc-samples/ransomware_simulator/v3/simulate.py",
-        "dst_glob": "*.locked",
         "src_ext": ".pdf",
-        "dst_ext": ".locked",
         "default_count": 200,
         "out_dir": REPO_ROOT / "datasets/heldout/v3",
     },
 }
 
 AC2_RE = re.compile(r"AC2_MEASURED_MS=([0-9.]+)")
+DST_EXT_RE = re.compile(r"DST_EXT=(\S+)")
 
 
 def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
@@ -67,20 +64,26 @@ def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
 
     with tempfile.TemporaryDirectory(prefix=f"velxor-{variant}-") as tmp:
         t_start_ms = int(time.time() * 1000)
+        # --seed=run_idx → 재현 가능, 단 매 run 별 다른 분포.
         result = subprocess.run(
-            [sys.executable, str(rule["simulate"]), tmp, "--count", str(count)],
+            [sys.executable, str(rule["simulate"]), tmp,
+             "--count", str(count), "--seed", str(run_idx)],
             capture_output=True, text=True, check=True,
         )
         m = AC2_RE.search(result.stdout)
         if not m:
             raise RuntimeError(f"{variant}: AC2_MEASURED_MS missing in simulate output")
         elapsed_ms = float(m.group(1))
+        em = DST_EXT_RE.search(result.stdout)
+        if not em:
+            raise RuntimeError(f"{variant}: DST_EXT missing in simulate output")
+        dst_ext = em.group(1)
 
-        dst_files = sorted(Path(tmp).glob(rule["dst_glob"]))
-        if len(dst_files) != count:
-            raise RuntimeError(
-                f"{variant}: expected {count} dst files, got {len(dst_files)}"
-            )
+        dst_files = sorted(Path(tmp).glob(f"*{dst_ext}"))
+        actual_count = len(dst_files)
+        if actual_count == 0:
+            raise RuntimeError(f"{variant}: 0 dst files matched *{dst_ext} in {tmp}")
+        # count 는 jitter 됨 — 입력 base 와 일치 강제 X.
 
         pid = os.getpid()
         parent_pid = os.getppid()
@@ -88,8 +91,8 @@ def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
         events = []
         seq = 0
         for i, dst in enumerate(dst_files):
-            ts = t_start_ms + int((i / count) * elapsed_ms)
-            base = dst.name[: -len(rule["dst_ext"])]
+            ts = t_start_ms + int((i / actual_count) * elapsed_ms)
+            base = dst.name[: -len(dst_ext)]
             src_path = str(dst.parent / f"{base}{rule['src_ext']}")
             dst_path = str(dst)
 
@@ -138,7 +141,7 @@ def main():
         choices=list(VARIANT_RULES.keys()) + ["all"],
         default="all",
     )
-    p.add_argument("--runs", type=int, default=10, help="variant당 run 횟수")
+    p.add_argument("--runs", type=int, default=30, help="variant당 run 횟수")
     p.add_argument(
         "--count", type=int, default=None,
         help="run당 op count (미지정 시 variant default 사용)",
