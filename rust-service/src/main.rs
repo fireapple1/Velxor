@@ -7,7 +7,19 @@ mod ws_broadcaster;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
+
+/// AC4 tracing helper — unix-millis timestamp. Used by §5.2 instrumentation
+/// (`event_received_ts` / `ws_sent_ts` / `classify_start_ts` / `classify_end_ts`).
+/// Worker-C parses these from `logs/trace.json` to compute p99 latencies
+/// (`scripts/eval-ac4.sh`).
+pub fn time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -133,9 +133,16 @@ pub async fn run(
                         let replay2 = replay.clone();
 
                         // JoinSet: tasks are aborted on shutdown when join_set is dropped (fix K).
+                        let n_arrived = events.len() as u64;
                         join_set.spawn(async move {
+                            // AC4 §5.2: classify_start_ts + n_arrived emit (burst → /classify 호출 직전).
+                            let cs = crate::time_ms();
+                            tracing::info!(classify_start_ts = cs, n_arrived, pid, "classify_start");
                             match classifier_client::classify_with_cache(&cache2, pid, &events, 1000).await {
                                 Ok(result) => {
+                                    // AC4 §5.2: classify_end_ts emit + per-call latency_ms (C eval-ac4.sh가 nearest-rank p99 산출).
+                                    let ce = crate::time_ms();
+                                    tracing::info!(classify_end_ts = ce, classify_start_ts = cs, latency_ms = ce.saturating_sub(cs), pid, n_arrived, "classify_done");
                                     // Fix B: auto-block when VELXOR_AUTOBLOCK is set and verdict=ransomware.
                                     if result.get("verdict") == Some(&serde_json::Value::String("ransomware".into()))
                                         && std::env::var("VELXOR_AUTOBLOCK").is_ok()
@@ -172,7 +179,9 @@ pub async fn run(
                                     let _ = tx2.send(verdict_msg);
                                 }
                                 Err(e) => {
-                                    tracing::warn!(error=%e, pid, "classify failed");
+                                    // AC4 §5.2: classify failure도 latency 측정 — C가 timeout/error 비율 계산 가능.
+                                    let ce = crate::time_ms();
+                                    tracing::warn!(classify_end_ts = ce, classify_start_ts = cs, latency_ms = ce.saturating_sub(cs), pid, n_arrived, error=%e, "classify_failed");
                                 }
                             }
                             in_flight2.lock().await.remove(&pid);

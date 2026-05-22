@@ -26,6 +26,17 @@ pub struct BlockResult {
     pub outcome: Outcome,
 }
 
+/// Human-readable form used in alert WsMessage `payload.message` (schema §3.2).
+/// JSON serialization → snake_case wire (Outcome enum #[serde(rename_all = "snake_case")]).
+impl std::fmt::Display for BlockResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_string(self) {
+            Ok(s) => f.write_str(&s),
+            Err(_) => write!(f, "{:?}", self),
+        }
+    }
+}
+
 /// RAII wrapper that closes a pidfd when dropped.
 struct Pidfd(i32);
 

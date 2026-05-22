@@ -48,6 +48,8 @@ async fn poll_events_jsonl(
                     if line.trim().is_empty() { continue; }
                     if let Ok(ev) = serde_json::from_str::<serde_json::Value>(line) {
                         let s = seq.fetch_add(1, Ordering::Relaxed);
+                        // AC4 §5.2: event_received_ts emit (collector → aggregator 수신 시점).
+                        tracing::info!(event_received_ts = crate::time_ms(), seq = s, src = "stub", "evt_in");
                         let msg = WsMessage {
                             schema_version: "1.0".into(),
                             seq: s,

@@ -129,6 +129,9 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer, port: u
             let mut last_sent_seq: u64 = backlog_max_seq;
             for msg in backlog {
                 let msg_seq = msg.seq;
+                let msg_type = msg.r#type.clone();
+                // AC4 §5.2: ws_sent_ts emit (backlog 재전송 경로). live recv 경로에도 동일 emit.
+                tracing::info!(ws_sent_ts = crate::time_ms(), seq = msg_seq, msg_type = %msg_type, src = "backlog", "ws_out");
                 if let Ok(json) = serde_json::to_string(&msg)
                     && ws.send(Message::Text(json.into())).await.is_err()
                 {
@@ -176,6 +179,8 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer, port: u
                             lagged_pending = false;
                         }
                         let msg_seq = msg.seq;
+                        // AC4 §5.2: ws_sent_ts emit (live path). src="live" 로 backlog 경로와 jq 필터 대칭.
+                        tracing::info!(ws_sent_ts = crate::time_ms(), seq = msg_seq, msg_type = %msg.r#type, src = "live", "ws_out");
                         if let Ok(json) = serde_json::to_string(&msg)
                             && ws.send(Message::Text(json.into())).await.is_err()
                         {

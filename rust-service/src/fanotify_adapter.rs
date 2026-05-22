@@ -169,6 +169,8 @@ pub async fn run_fanotify(
             // Fix 2: build payload with current dropped_since_last snapshot, then
             // attempt send first; reset/increment counter based on send result.
             let s = seq.fetch_add(1, Ordering::Relaxed);
+            // AC4 §5.2: event_received_ts emit (real-fanotify path).
+            tracing::info!(event_received_ts = crate::time_ms(), seq = s, src = "fanotify", "evt_in");
             let payload = build_payload(&ev, dropped_since_last, s, event_type);
             let msg = WsMessage {
                 schema_version: "1.0".into(),
