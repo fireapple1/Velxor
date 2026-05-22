@@ -1,3 +1,4 @@
+mod blocker;
 mod collector_source;
 mod aggregator;
 mod classifier_client;
@@ -19,14 +20,16 @@ async fn main() -> anyhow::Result<()> {
     let collector_seq = seq.clone();
     let agg_seq = seq.clone();
 
-    let ws  = tokio::spawn(ws_broadcaster::run(tx.clone(), replay.clone(), 7000));
-    let src = tokio::spawn(collector_source::run(tx.clone(), replay.clone(), collector_seq));
-    let agg = tokio::spawn(aggregator::run(tx.subscribe(), tx.clone(), agg_seq));
+    let ws   = tokio::spawn(ws_broadcaster::run(tx.clone(), replay.clone(), 7000));
+    let src  = tokio::spawn(collector_source::run(tx.clone(), replay.clone(), collector_seq));
+    let agg  = tokio::spawn(aggregator::run(tx.subscribe(), tx.clone(), agg_seq));
+    let http = tokio::spawn(blocker::run_http_server(7001));
 
     tokio::select! {
-        r = ws  => r??,
-        r = src => r??,
-        r = agg => r??,
+        r = ws   => r??,
+        r = src  => r??,
+        r = agg  => r??,
+        r = http => r??,
     }
     Ok(())
 }
