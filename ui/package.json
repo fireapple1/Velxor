@@ -1,0 +1,30 @@
+{
+  "name": "velxor-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Velxor UI — React + Electron 실시간 행위 탐지 시각화 (worker B)",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 5173",
+    "typecheck": "tsc -b --noEmit",
+    "electron:start": "electron ."
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.3.5",
+    "dagre": "^0.8.5",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/dagre": "^0.7.52",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "^31.7.7",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7"
+  }
+}
