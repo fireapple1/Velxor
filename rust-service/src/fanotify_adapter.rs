@@ -1,7 +1,9 @@
 // Week 4-5 §4.1: libfanotify adapter for Velxor collector.
 // Uses `nix::sys::fanotify` (nix 0.31.3 exposes Fanotify/InitFlags/MarkFlags/MaskFlags
-// under the "fanotify" feature). Falls back to FAN_MODIFY|FAN_CLOSE_WRITE|FAN_OPEN_EXEC|
-// FAN_RENAME (kernel >= 5.17 / Ubuntu 24.04 kernel 6.8). The fanotify fd is opened
+// under the "fanotify" feature). Mask: FAN_MODIFY|FAN_CLOSE_WRITE|FAN_OPEN_EXEC.
+// FAN_RENAME is deferred to v1.1 schema collation — it requires init class
+// FAN_REPORT_FID/DIR_FID/DFID_NAME, which changes event metadata layout (no
+// per-event fd, name carried in FAN_EVENT_INFO_TYPE_*). The fanotify fd is opened
 // non-blocking and driven via `tokio::io::unix::AsyncFd` so the await is cancellation-safe
 // and the runtime is never stalled.
 

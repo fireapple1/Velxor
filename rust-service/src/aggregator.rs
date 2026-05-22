@@ -12,6 +12,9 @@ use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
 const WINDOW_SECS: u64 = 5;
 const BURST_WINDOW_SECS: u64 = 1;
 const FILE_WRITE_BURST: usize = 50;
+// Kept warm for v1.1: FAN_RENAME currently disabled in fanotify_adapter (requires
+// FAN_REPORT_DFID_NAME class). file_renames counter / FILE_RENAME_BURST path stays
+// in place so that flipping the mask flag in v1.1 needs no aggregator change.
 const FILE_RENAME_BURST: usize = 30;
 const CLASSIFY_DEBOUNCE_SECS: u64 = 1;
 const PRUNE_INTERVAL_SECS: u64 = 30;

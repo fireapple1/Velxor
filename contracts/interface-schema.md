@@ -39,7 +39,7 @@ Rust collector(A) → Rust service(A) 송신용 wire 포맷. JSONL 1줄 = 1 메�
 | `pid` | u32 | ✓ | source PID |
 | `parent_pid` | u32 | ✓ | `/proc/<pid>/status` PPid |
 | `image_path` | string | ✓ | UTF-8, ≤ 4096 bytes (Linux PATH_MAX), `/proc/<pid>/exe` readlink |
-| `event_type` | enum | ✓ | `FileWrite` \| `FileRename` \| `ProcessCreate` |
+| `event_type` | enum | ✓ | `FileWrite` \| `FileRename` \| `ProcessCreate` (FileRename emit는 v1.1 collation에 deferred — collector v1.0은 미발행. consumer는 enum 유지) |
 | `file_path` | string? | optional | UTF-8, ≤ 4096 bytes (`ProcessCreate`는 null 가능) |
 | `volume_id` | string? | optional | ext4 dev-major-minor 또는 mount path |
 | `op_detail` | object? | optional | `FileWrite`: `{file_size: u64, entropy_hint: u32}` |
