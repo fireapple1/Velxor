@@ -1,6 +1,7 @@
 mod collector_source;
 mod aggregator;
 mod classifier_client;
+mod fanotify_adapter;
 mod ws_broadcaster;
 
 use tokio::sync::broadcast;

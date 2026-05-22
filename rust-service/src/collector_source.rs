@@ -8,8 +8,9 @@ pub async fn run(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer) -> anyh
     if mode == "collector" || mode == "both" {
         return poll_events_jsonl(tx, replay).await;
     }
-    // Week 4-5에서 fanotify 어댑터로 교체
-    poll_events_jsonl(tx, replay).await
+    // Week 4-5 §4.1: real libfanotify adapter. Seq starts at 1 and is monotonic
+    // for the process lifetime (the adapter owns its own counter from here).
+    crate::fanotify_adapter::run_fanotify(tx, replay, 1).await
 }
 
 async fn poll_events_jsonl(tx: broadcast::Sender<WsMessage>, replay: ReplayBuffer) -> anyhow::Result<()> {

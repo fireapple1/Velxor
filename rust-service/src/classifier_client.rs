@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub async fn classify(events: &[serde_json::Value], window_ms: u32) -> anyhow::Result<serde_json::Value> {
     let url = std::env::var("VELXOR_CLASSIFIER_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8765/classify".to_string());
