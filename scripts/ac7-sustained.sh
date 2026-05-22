@@ -135,9 +135,11 @@ E_DELTA=$(pct_delta "$E_START" "$E_END")
 R_DELTA=$(pct_delta "$R_START" "$R_END")
 
 # 메트릭 추출 — rust.log 에서 dropped_since_last > 0 + classify done/failed 카운트
-DROPPED=$(grep -oE '"dropped_since_last":[1-9][0-9]*' "$RUST_LOG" | wc -l || echo 0)
-N_DONE=$(grep -c '"classify_done"' "$RUST_LOG" || echo 0)
-N_FAILED=$(grep -c '"classify_failed"' "$RUST_LOG" || echo 0)
+# grep -c 가 no-match 시 "0" + exit 1 → || echo 0 가 추가로 "0" 출력해 "0\n0" 됨.
+# pipefail 환경에서 안전한 단일 정수 출력은 awk 사용.
+DROPPED=$(awk '/"dropped_since_last":[1-9]/ {c++} END {print c+0}' "$RUST_LOG")
+N_DONE=$(awk '/"classify_done"/  {c++} END {print c+0}' "$RUST_LOG")
+N_FAILED=$(awk '/"classify_failed"/ {c++} END {print c+0}' "$RUST_LOG")
 # float ratio via awk
 RATIO=$(awk -v d="$N_DONE" -v f="$N_FAILED" 'BEGIN { tot=d+f; if (tot==0) print 0; else printf "%.4f", f/tot }')
 

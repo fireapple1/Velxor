@@ -5,8 +5,12 @@ set -euo pipefail
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# venv 우선, 없으면 시스템 python3
+PY="python-engine/.venv/bin/python"
+[[ -x "$PY" ]] || PY="python3"
+
 # simulate.py 내부 perf_counter 결과를 신뢰 (sub-ms 해상도 + monotonic)
-OUTPUT=$(python poc-samples/ransomware_simulator/v1/simulate.py "$TMP" --count 300)
+OUTPUT=$("$PY" poc-samples/ransomware_simulator/v1/simulate.py "$TMP" --count 300)
 echo "$OUTPUT"
 
 ELAPSED_MS=$(echo "$OUTPUT" | grep -oE 'AC2_MEASURED_MS=[0-9.]+' | cut -d= -f2)
