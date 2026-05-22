@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Bursty-benign Ubuntu 워크로드 실행 + 디렉토리 스캔 → BehaviorEventV1 JSONL
+(worker-C-timeline §6.4, 방식 C 하이브리드).
+
+방식 C 의미: A 의 fanotify collector 없이 C 단독으로 진행. 워크로드 실행 후
+결과 디렉토리를 os.walk + os.stat 으로 스캔해 합성 이벤트 emit. positive 와
+동일 BehaviorEventV1 v1.0 schema, FileRename + FileWrite dual emit 일관.
+A 의 fanotify 가 살아나면 동일 워크로드를 collector 로 재캡처해 비교 검증 예정.
+
+적재 경로: datasets/negative/<label>_run_01.jsonl
+
+⚠️ ext4 로컬에 두고 /tmp(tmpfs) 회피 — tmpfs 는 RAM 직격이라 디스크 IO 분포가
+   비현실적으로 빨라짐 (timeline §6.4 본문).
+
+Usage (repo root, venv 활성화 후, 인터넷 필요):
+    scripts/gen-negative.py                       # 4 workload × 변형 = 10 runs
+    scripts/gen-negative.py --workload rsync_500  # 단일 워크로드
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import zipfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+NEGATIVE_DIR = REPO_ROOT / "datasets" / "negative"
+WORK_ROOT = Path.home() / "velxor-work"
+
+
+def prep_source_tree(src_dir: Path, n: int):
+    """대량 rename/write 유도용 소파일 트리 사전 준비."""
+    if src_dir.exists():
+        shutil.rmtree(src_dir)
+    src_dir.mkdir(parents=True)
+    for i in range(n):
+        (src_dir / f"file_{i:04d}.txt").write_text(f"dummy-{i}\n")
+
+
+def prep_zip_archive(zip_path: Path, n: int):
+    """unzip 워크로드용 zip 사전 생성."""
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i in range(n):
+            zf.writestr(f"entry_{i:04d}.dat", f"payload-{i}\n" * 8)
+
+
+def scan_to_events(dst_dir: Path, t_start_ms: int, elapsed_ms: float) -> list[dict]:
+    """결과 디렉토리 walk → 파일별 FileRename + FileWrite dual emit (positive 일관).
+    ts 는 워크로드 측정 시작점 + (i/n) × elapsed 로 균등 분배 — mtime 폭주 회피."""
+    pid = os.getpid()
+    parent_pid = os.getppid()
+    image_path = sys.executable
+    paths = []
+    for root, _, files in os.walk(dst_dir):
+        for name in files:
+            paths.append(Path(root) / name)
+    paths.sort()
+
+    n = max(len(paths), 1)
+    events = []
+    seq = 0
+    for i, p in enumerate(paths):
+        try:
+            st = p.stat()
+        except FileNotFoundError:
+            continue
+        ts = t_start_ms + int((i / n) * elapsed_ms)
+        seq += 1
+        events.append({
+            "schema_version": "1.0",
+            "seq": seq,
+            "dropped_since_last": 0,
+            "pid": pid,
+            "parent_pid": parent_pid,
+            "image_path": image_path,
+            "event_type": "FileRename",
+            "file_path": str(p),
+            "op_detail": {"src_path": f"{p}.tmp", "dst_path": str(p)},
+            "ts_unix_ms": ts,
+        })
+        seq += 1
+        events.append({
+            "schema_version": "1.0",
+            "seq": seq,
+            "dropped_since_last": 0,
+            "pid": pid,
+            "parent_pid": parent_pid,
+            "image_path": image_path,
+            "event_type": "FileWrite",
+            "file_path": str(p),
+            "op_detail": {"file_size": st.st_size},
+            "ts_unix_ms": ts,
+        })
+    return events
+
+
+def write_jsonl(events: list[dict], out_path: Path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        for e in events:
+            f.write(json.dumps(e) + "\n")
+
+
+def run_rsync(n_files: int) -> Path:
+    src = WORK_ROOT / f"rsync_src_{n_files}"
+    dst = WORK_ROOT / f"rsync_dst_{n_files}"
+    shutil.rmtree(dst, ignore_errors=True)
+    prep_source_tree(src, n_files)
+    subprocess.run(
+        ["rsync", "-aH", "--delete", f"{src}/", f"{dst}/"],
+        check=True, capture_output=True, timeout=60,
+    )
+    return dst
+
+
+def run_unzip(n_entries: int) -> Path:
+    zip_path = WORK_ROOT / f"archive_{n_entries}.zip"
+    dst = WORK_ROOT / f"unzip_dst_{n_entries}"
+    shutil.rmtree(dst, ignore_errors=True)
+    prep_zip_archive(zip_path, n_entries)
+    subprocess.run(
+        ["unzip", "-o", "-q", str(zip_path), "-d", str(dst)],
+        check=True, capture_output=True, timeout=60,
+    )
+    return dst
+
+
+def run_git_clone(repo_url: str, name: str) -> Path:
+    dst = WORK_ROOT / f"git_{name}"
+    shutil.rmtree(dst, ignore_errors=True)
+    subprocess.run(
+        ["git", "clone", "--depth", "1", repo_url, str(dst)],
+        check=True, capture_output=True, timeout=120,
+    )
+    return dst
+
+
+def run_npm_install(name: str) -> Path:
+    repo_dir = WORK_ROOT / f"git_{name}"
+    if not repo_dir.exists():
+        raise FileNotFoundError(f"{repo_dir} 미존재 — git_clone 먼저 실행")
+    subprocess.run(
+        ["npm", "install", "--silent", "--no-audit", "--no-fund"],
+        cwd=str(repo_dir),
+        check=True, capture_output=True, timeout=300,
+    )
+    return repo_dir / "node_modules"
+
+
+WORKLOADS = [
+    ("rsync_300",   lambda: run_rsync(300)),
+    ("rsync_500",   lambda: run_rsync(500)),
+    ("rsync_1000",  lambda: run_rsync(1000)),
+    ("rsync_2000",  lambda: run_rsync(2000)),
+    ("unzip_200",   lambda: run_unzip(200)),
+    ("unzip_500",   lambda: run_unzip(500)),
+    ("unzip_1000",  lambda: run_unzip(1000)),
+    ("unzip_2000",  lambda: run_unzip(2000)),
+    ("gitclone_express",
+        lambda: run_git_clone("https://github.com/expressjs/express", "express")),
+    ("npm_install_express",
+        lambda: run_npm_install("express")),
+]
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--workload", default="all",
+                   help="라벨 또는 'all' (10종)")
+    args = p.parse_args()
+
+    WORK_ROOT.mkdir(parents=True, exist_ok=True)
+    NEGATIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+    selected = WORKLOADS if args.workload == "all" else [
+        (l, fn) for l, fn in WORKLOADS if l == args.workload
+    ]
+    if not selected:
+        print(f"unknown workload: {args.workload}", file=sys.stderr)
+        sys.exit(2)
+
+    successes, skips = [], []
+    for label, fn in selected:
+        try:
+            t_start_ms = int(time.time() * 1000)
+            t0 = time.perf_counter()
+            dst = fn()
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            events = scan_to_events(dst, t_start_ms, elapsed_ms)
+            if not events:
+                skips.append((label, "0 events scanned"))
+                print(f"  {label}: SKIP (0 events)", file=sys.stderr)
+                continue
+            out = NEGATIVE_DIR / f"{label}_run_01.jsonl"
+            write_jsonl(events, out)
+            successes.append((label, len(events), elapsed_ms))
+            print(f"  {label}: {len(events)} events in {elapsed_ms:.0f} ms "
+                  f"→ {out.relative_to(REPO_ROOT)}")
+        except (subprocess.CalledProcessError, FileNotFoundError,
+                subprocess.TimeoutExpired) as e:
+            skips.append((label, f"{type(e).__name__}"))
+            print(f"  {label}: SKIP ({type(e).__name__})", file=sys.stderr)
+
+    print()
+    print(f"=== generated {len(successes)} negative JSONL files "
+          f"(skipped {len(skips)}) ===")
+    if skips:
+        print("--- skipped ---")
+        for l, r in skips:
+            print(f"  {l}: {r}")
+
+
+if __name__ == "__main__":
+    main()
