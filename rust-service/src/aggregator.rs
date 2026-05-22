@@ -1,23 +1,25 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use tokio::sync::broadcast;
+use tokio::task::JoinSet;
 
 use crate::classifier_client;
-use crate::ws_broadcaster::WsMessage;
+use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
 
 const WINDOW_SECS: u64 = 5;
 const BURST_WINDOW_SECS: u64 = 1;
 const FILE_WRITE_BURST: usize = 50;
 const FILE_RENAME_BURST: usize = 30;
 const CLASSIFY_DEBOUNCE_SECS: u64 = 1;
+const PRUNE_INTERVAL_SECS: u64 = 30;
 
 pub struct PidWindow {
     pub file_writes: Vec<Instant>,
     pub file_renames: Vec<Instant>,
-    pub recent_events: VecDeque<(Instant, serde_json::Value)>,
+    pub recent_events: VecDeque<(Instant, Arc<serde_json::Value>)>,
 }
 
 impl PidWindow {
@@ -29,7 +31,7 @@ impl PidWindow {
         }
     }
 
-    pub fn add(&mut self, event_type: &str, event_payload: serde_json::Value, now: Instant) {
+    pub fn add(&mut self, event_type: &str, event_payload: Arc<serde_json::Value>, now: Instant) {
         match event_type {
             "FileWrite" => self.file_writes.push(now),
             "FileRename" => self.file_renames.push(now),
@@ -59,7 +61,7 @@ impl PidWindow {
         writes >= FILE_WRITE_BURST || renames >= FILE_RENAME_BURST
     }
 
-    pub fn events_last_1s(&self, now: Instant) -> Vec<serde_json::Value> {
+    pub fn events_last_1s(&self, now: Instant) -> Vec<Arc<serde_json::Value>> {
         let one_sec = std::time::Duration::from_secs(BURST_WINDOW_SECS);
         self.recent_events
             .iter()
@@ -73,12 +75,19 @@ pub async fn run(
     mut rx: broadcast::Receiver<WsMessage>,
     tx: broadcast::Sender<WsMessage>,
     seq: Arc<AtomicU64>,
+    replay: ReplayBuffer,
 ) -> anyhow::Result<()> {
-    // TODO(§4.7 stress): prune Aggregator entries whose recent_events is empty after prune — currently unbounded under PID churn.
     let mut windows: HashMap<u32, PidWindow> = HashMap::new();
     let cache = Arc::new(classifier_client::VerdictCache::new());
-    // TODO(§4.7 stress): debounce starts at trigger time, not response time — under classifier slowdown, consecutive fires gap ~820ms instead of full 1s. Pair with an in-flight HashSet<pid> guard.
     let mut last_classify_at: HashMap<u32, Instant> = HashMap::new();
+    // in_flight: PIDs with a classify task currently running — guards against
+    // response-time gaps shorter than 1s when the classifier is slow (fix I).
+    let in_flight: Arc<tokio::sync::Mutex<HashSet<u32>>> =
+        Arc::new(tokio::sync::Mutex::new(HashSet::new()));
+    let mut last_prune_at: Instant = Instant::now();
+    let prune_interval = std::time::Duration::from_secs(PRUNE_INTERVAL_SECS);
+    // JoinSet holds all classify tasks; drop → abort all on shutdown (fix K).
+    let mut join_set: JoinSet<()> = JoinSet::new();
 
     loop {
         match rx.recv().await {
@@ -97,27 +106,52 @@ pub async fn run(
                 };
 
                 let window = windows.entry(pid).or_insert_with(PidWindow::new);
-                window.add(&event_type, msg.payload.clone(), now);
+                // Wrap payload in Arc to avoid deep-cloning 15KB per burst (fix J).
+                window.add(&event_type, Arc::new(msg.payload.clone()), now);
 
                 if window.burst_1s(now) {
-                    // Dedup: skip if last classify was < 1s ago for this PID
-                    let should_classify = match last_classify_at.get(&pid) {
+                    // Debounce: skip if last classify was < 1s ago for this PID.
+                    let debounce_ok = match last_classify_at.get(&pid) {
                         Some(last) => now.duration_since(*last) >= std::time::Duration::from_secs(CLASSIFY_DEBOUNCE_SECS),
                         None => true,
                     };
+                    // in-flight guard: skip if a classify is already running for this PID (fix I).
+                    let already_running = in_flight.lock().await.contains(&pid);
 
-                    if should_classify {
+                    if debounce_ok && !already_running {
                         last_classify_at.insert(pid, now);
-                        // TODO(§4.7 stress): payload clones (~15KB/burst) — switch to Arc<serde_json::Value> if profiling shows hotspot.
+                        in_flight.lock().await.insert(pid);
+
                         let events = window.events_last_1s(now);
                         let tx2 = tx.clone();
                         let seq2 = seq.clone();
                         let cache2 = cache.clone();
+                        let in_flight2 = in_flight.clone();
+                        let replay2 = replay.clone();
 
-                        // TODO(§4.7 stress): detached classify task — on shutdown the spawned future may leak until reqwest timeout. Consider JoinSet + abort or CancellationToken.
-                        tokio::spawn(async move {
+                        // JoinSet: tasks are aborted on shutdown when join_set is dropped (fix K).
+                        join_set.spawn(async move {
                             match classifier_client::classify_with_cache(&cache2, pid, &events, 1000).await {
                                 Ok(result) => {
+                                    // Fix B: auto-block when VELXOR_AUTOBLOCK is set and verdict=ransomware.
+                                    if result.get("verdict") == Some(&serde_json::Value::String("ransomware".into()))
+                                        && std::env::var("VELXOR_AUTOBLOCK").is_ok()
+                                    {
+                                        let block_result = crate::blocker::block_pid(pid as i32).await;
+                                        let alert_s = seq2.fetch_add(1, Ordering::Relaxed);
+                                        let alert_msg = WsMessage {
+                                            schema_version: "1.0".to_string(),
+                                            seq: alert_s,
+                                            r#type: "alert".to_string(),
+                                            payload: serde_json::json!({
+                                                "block_result": block_result,
+                                                "reason": "auto_block_ransomware",
+                                            }),
+                                        };
+                                        replay2.push(alert_msg.clone()).await;
+                                        let _ = tx2.send(alert_msg);
+                                    }
+
                                     let s = seq2.fetch_add(1, Ordering::Relaxed);
                                     let verdict_msg = WsMessage {
                                         schema_version: "1.0".to_string(),
@@ -125,6 +159,7 @@ pub async fn run(
                                         r#type: "verdict".to_string(),
                                         payload: result,
                                     };
+                                    replay2.push(verdict_msg.clone()).await;
                                     // Ignore send error — no subscribers is not fatal
                                     let _ = tx2.send(verdict_msg);
                                 }
@@ -132,20 +167,49 @@ pub async fn run(
                                     tracing::warn!(error=%e, pid, "classify failed");
                                 }
                             }
+                            in_flight2.lock().await.remove(&pid);
                         });
                     }
                 }
+
+                // Non-blocking reap of completed JoinSet tasks to prevent internal Vec growth.
+                while join_set.try_join_next().is_some() {}
             }
             Ok(msg) => {
-                // r#type filter at line ~92 covers "node_add"; any other type
-                // (e.g., our own "verdict" emission) returns here.
-                // SAFETY: do not re-emit on this path — that would create a feedback loop.
+                // r#type filter covers "node_add"; any other type (e.g. "verdict", "alert")
+                // returns here. SAFETY: do not re-emit — that would create a feedback loop.
                 debug_assert!(msg.r#type != "node_add");
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
+                // TODO(§4.7 stress): under broadcast lag we lose n events from the windows
+                //   count, undercounting burst rate. Emit a synthetic "lag" alert and inflate
+                //   the dropped_since_last counter accordingly.
                 tracing::warn!(n, "aggregator lagged");
             }
             Err(broadcast::error::RecvError::Closed) => break,
+        }
+
+        // Periodic prune to bound HashMap growth under PID churn. Coupled to windows
+        // cleanup so an actively-bursting PID (window kept warm) keeps its debounce state.
+        let now = Instant::now();
+        if now.duration_since(last_prune_at) >= prune_interval {
+            last_prune_at = now;
+            let mut dead: Vec<u32> = Vec::new();
+            for (pid, win) in windows.iter_mut() {
+                win.prune(now);
+                if win.recent_events.is_empty()
+                    && win.file_writes.is_empty()
+                    && win.file_renames.is_empty()
+                {
+                    dead.push(*pid);
+                }
+            }
+            let pruned_count = dead.len();
+            for pid in &dead {
+                windows.remove(pid);
+                last_classify_at.remove(pid);
+            }
+            tracing::debug!(pruned_count, "aggregator prune");
         }
     }
 

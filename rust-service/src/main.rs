@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
 
     let ws   = tokio::spawn(ws_broadcaster::run(tx.clone(), replay.clone(), 7000));
     let src  = tokio::spawn(collector_source::run(tx.clone(), replay.clone(), collector_seq));
-    let agg  = tokio::spawn(aggregator::run(tx.subscribe(), tx.clone(), agg_seq));
+    let agg  = tokio::spawn(aggregator::run(tx.subscribe(), tx.clone(), agg_seq, replay.clone()));
     let http = tokio::spawn(blocker::run_http_server(7001));
 
     tokio::select! {

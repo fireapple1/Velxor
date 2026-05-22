@@ -1,20 +1,31 @@
 // Week 4-5 §4.1: libfanotify adapter for Velxor collector.
 // Uses `nix::sys::fanotify` (nix 0.31.3 exposes Fanotify/InitFlags/MarkFlags/MaskFlags
 // under the "fanotify" feature). Falls back to FAN_MODIFY|FAN_CLOSE_WRITE|FAN_OPEN_EXEC|
-// FAN_RENAME (kernel >= 5.17 / Ubuntu 24.04 kernel 6.8). Blocking fanotify read() runs
-// inside `tokio::task::spawn_blocking` so the tokio runtime is never stalled.
+// FAN_RENAME (kernel >= 5.17 / Ubuntu 24.04 kernel 6.8). The fanotify fd is opened
+// non-blocking and driven via `tokio::io::unix::AsyncFd` so the await is cancellation-safe
+// and the runtime is never stalled.
 
+use std::os::fd::AsRawFd;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nix::sys::fanotify::{
     EventFFlags, Fanotify, FanotifyEvent, InitFlags, MarkFlags, MaskFlags,
+    FANOTIFY_METADATA_VERSION,
 };
 use serde_json::json;
+use tokio::io::unix::AsyncFd;
 use tokio::sync::broadcast;
 
 use crate::ws_broadcaster::{ReplayBuffer, WsMessage};
+
+/// Emitted at most once per session for version-mismatch events (fix G).
+static VERSION_ALERT_SENT: AtomicBool = AtomicBool::new(false);
+
+/// Per-batch event cap: process at most this many events per read_events() call.
+/// Events beyond cap are counted as drops and logged (fix F).
+const MAX_EVENTS_PER_BATCH: usize = 256;
 
 /// Real fanotify-backed event source. Replaces the `events.jsonl` poll in the
 /// non-stub branch of `collector_source::run`.
@@ -30,7 +41,12 @@ pub async fn run_fanotify(
     });
     std::fs::create_dir_all(&work)?;
 
-    let fan = Fanotify::init(InitFlags::FAN_CLASS_NOTIF, EventFFlags::O_RDONLY)?;
+    // O_NONBLOCK is required so AsyncFd can drive readiness via epoll without parking
+    // a blocking thread; EAGAIN on read_events is treated as "no data, wait again".
+    let fan = Fanotify::init(
+        InitFlags::FAN_CLASS_NOTIF,
+        EventFFlags::O_RDONLY | EventFFlags::O_NONBLOCK,
+    )?;
 
     // FAN_RENAME requires kernel >= 5.17. Ubuntu 24.04 ships 6.8 so we always
     // request it; if a future port lands on an older kernel, `mark()` will EINVAL
@@ -53,42 +69,79 @@ pub async fn run_fanotify(
 
     tracing::info!(work, "fanotify watching mount");
 
-    // TODO(§4.7): Arc<Fanotify> smell — Fanotify fd should be owned by the
-    // spawn_blocking task exclusively; switch to a channel-based hand-off to
-    // avoid the Arc when nix gains Send on Fanotify directly.
-    let fan = Arc::new(fan);
+    // Single-owner Fanotify driven via AsyncFd. AsyncFd::new takes the RawFd by value
+    // but does NOT take ownership of the fd — `fan` stays alive (and owns the OwnedFd
+    // it wraps); when `fan` is dropped at end-of-scope the underlying fd is closed.
+    let async_fd = AsyncFd::new(fan.as_raw_fd())?;
     let mut dropped_since_last: u32 = 0;
 
     loop {
-        // TODO(§4.7): spawn_blocking cancellation — JoinHandle is currently
-        // dropped on tokio shutdown; add a CancellationToken so the blocking
-        // thread exits cleanly instead of being abandoned.
-        let fan_clone = Arc::clone(&fan);
-        let read_result = tokio::task::spawn_blocking(move || fan_clone.read_events()).await?;
+        // readable().await is cancellation-safe: if the outer task is cancelled the
+        // future is dropped cleanly with no orphaned thread.
+        let mut guard = async_fd.readable().await?;
 
-        let events = match read_result {
-            Ok(ev) => ev,
-            Err(nix::Error::EINTR) => continue,
+        let events = match fan.read_events() {
+            Ok(ev) => {
+                guard.clear_ready();
+                ev
+            }
+            Err(nix::errno::Errno::EAGAIN) => {
+                // Spurious wakeup or another reader drained the queue: clear readiness
+                // so the next loop iteration re-arms epoll.
+                guard.clear_ready();
+                continue;
+            }
+            Err(nix::Error::EINTR) => {
+                guard.clear_ready();
+                continue;
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "fanotify read_events failed");
+                guard.clear_ready();
                 continue;
             }
         };
 
-        for ev in events {
-            // TODO(§4.7): fd exhaustion — fanotify event fds accumulate if we
-            // process faster than we drop; add a bounded channel or explicit
-            // drop checkpoint to bound open-fd count under high event rates.
+        // Fix F: cap per-batch processing to MAX_EVENTS_PER_BATCH to bound open-fd count
+        // under burst. Events beyond the cap are counted as drops (schema §1.4 silent-drop
+        // rule: count them in dropped_since_last and log).
+        let batch_len = events.len();
+        if batch_len > MAX_EVENTS_PER_BATCH {
+            let overflow = (batch_len - MAX_EVENTS_PER_BATCH) as u32;
+            tracing::warn!(
+                dropped = overflow,
+                "fanotify batch overflow — capping at {} events per iter",
+                MAX_EVENTS_PER_BATCH
+            );
+            dropped_since_last = dropped_since_last.saturating_add(overflow);
+        }
 
-            // Skip queue-overflow / version-mismatch noise; surface as warning.
-            // TODO(§4.7): check_version alert — consider emitting a structured
-            // metric/alert instead of a plain warn when this fires repeatedly.
+        for ev in events.into_iter().take(MAX_EVENTS_PER_BATCH) {
+            // Fix G: emit one structured WsMessage alert per session on version mismatch.
             if !ev.check_version() {
                 tracing::warn!(
-                    expected = nix::sys::fanotify::FANOTIFY_METADATA_VERSION,
+                    expected = FANOTIFY_METADATA_VERSION,
                     got = ev.version(),
                     "fanotify metadata version mismatch — skipping event"
                 );
+                // Suppress repeated alerts after the first one this session.
+                if !VERSION_ALERT_SENT.swap(true, Ordering::Relaxed) {
+                    let alert_s = seq.fetch_add(1, Ordering::Relaxed);
+                    let alert_msg = WsMessage {
+                        schema_version: "1.0".into(),
+                        seq: alert_s,
+                        r#type: "alert".into(),
+                        payload: json!({
+                            "severity": "warning",
+                            "code": "fanotify_metadata_version_mismatch",
+                            "expected": FANOTIFY_METADATA_VERSION,
+                            "got": ev.version(),
+                        }),
+                    };
+                    if tx.send(alert_msg.clone()).is_ok() {
+                        replay.push(alert_msg).await;
+                    }
+                }
                 continue;
             }
 
