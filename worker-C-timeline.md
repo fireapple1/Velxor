@@ -1,11 +1,13 @@
 # 작업자 C — 타임라인 최적화 실행 플랜 (Copy-Paste Runnable)
 
-> **목적**: 이 문서 하나만 위에서 아래로 따라가면 작업자 C의 ~40h 분량(Python 분석 엔진 + 합성 PoC + AC2/AC4/AC5 측정 + 발표 슬라이드)이 그대로 진행된다.
-> **선행 문서**: [`worker-C-tasks.md`](./worker-C-tasks.md), [`velxor-consensus-plan.md`](./velxor-consensus-plan.md), [`ENVIRONMENT.md`](./ENVIRONMENT.md)
+> **목적**: 이 문서 하나만 위에서 아래로 따라가면 작업자 C의 ~45h 분량(Python 분석 엔진 + 합성 PoC + AC2/AC4/AC5 측정 + System Orchestration glue + Python contract DRI + ARCHITECTURE.md + 발표 슬라이드)이 그대로 진행된다.
+> **선행 문서**: [`worker-C-tasks.md`](./worker-C-tasks.md), [`velxor-consensus-plan.md`](./velxor-consensus-plan.md), [`ENVIRONMENT.md`](./ENVIRONMENT.md), A의 [`contracts/interface-schema.md`](./contracts/interface-schema.md)
 > **브랜치**: `devC` (모든 PR은 `devC → main`)
 > **OS 가정**: **Ubuntu 24.04 LTS** (bare-metal 또는 VM), native `/usr/bin/bash` 5.2.
 >  22.04 호환은 비범위 — Python 3.10 기본이라 deadsnakes 추가가 필요해 흐름이 달라진다.
 > **Python**: **3.12.x (Ubuntu 24.04 기본)**. `sudo apt install -y python3 python3-venv python3-dev` 한 줄로 끝. 본 문서의 모든 `python` 명령은 venv 활성화 후 사용한다 (venv의 `python` symlink가 3.12를 가리킴).
+>
+> **2026-05-22 재분배**: 종전 "C=Python engine + PoC + 측정"에서 **"C=Python + PoC + 측정 + System Orchestration glue(`scripts/run-all.sh`) + Interface Contract Python DRI(`/classify` REST 섹션) + `docs/ARCHITECTURE.md` 신규 흡수"**로 확장 (+5h, ~45h). A의 critical path overload를 분산하는 의도된 흡수.
 
 ---
 
@@ -119,7 +121,7 @@ git push -u origin devC
 
 ## 2. Week 1 — Walking Skeleton (목표: 5h)
 
-> **AC1 공동 책임**: `run-all.sh` exit 0 + `ws-record.sh` 캡처에 `node_add{event_type:"FileWrite"}` 확인. C는 engine 측을 책임.
+> **AC1 공동 책임 (재분배 2026-05-22)**: `run-all.sh` exit 0 + `ws-record.sh`(A 작성) 캡처에 `node_add{event_type:"FileWrite"}` 확인. **C가 `run-all.sh` owner 겸 `walking-skeleton-v1` tag push 주관**.
 
 ### 2.1 `app.py`에 stub `/classify` 추가
 ```python
@@ -183,8 +185,9 @@ def classify_events(events: list[dict], window_ms: int) -> dict:
 
 > *(개념)* "영속 백업"은 모델 pickle 깨짐·학습 미달·`/classify p99>100ms` 등 어떤 모델 측 사고가 나도 엔진이 **항상 200을 반환**하도록 보장하는 마지막 안전망이다. 모델 성능 하락은 발표에서 설명 가능한 리스크지만, 200을 못 돌려주는 엔진은 AC8/AC4 둘 다 무효화하므로 가용성 우선순위가 정확도보다 높다.
 
-### 2.3 Schema v1-draft mechanical ack
-- B가 `contracts/interface-schema.md` 발행 알림이 오면, 그 PR에 **한 줄 코멘트**로 "compiles-against-engine: OK" 또는 컴파일 가능 여부만 응답. (의미 검토는 Week 3.)
+### 2.3 Schema v1-draft mechanical ack + **Python DRI 섹션 검토**
+- A가 `contracts/interface-schema.md` 발행 알림이 오면, 그 PR에 **한 줄 코멘트**로 "compiles-against-engine: OK" 또는 컴파일 가능 여부 응답.
+- **추가 (재분배 후 C가 Python DRI)**: `/classify` REST 섹션(req/resp schema, p99 SLA, model_version 컨벤션)이 본인이 구현할 Flask 코드와 일치하는지 1차 검토 → 누락된 부분은 A에게 직접 추가 요청. (의미 검토 본안은 Week 3.)
 
 ### 2.4 Week 1 검증 게이트
 ```bash
@@ -201,19 +204,82 @@ curl -fsS -X POST http://127.0.0.1:8765/classify \
 # trap EXIT이 자동으로 SERVER_PID 종료 — curl 실패 시에도 포트 누수 없음
 ```
 
-루트에서 `scripts/run-all.sh` 통과 (B 주관) + `ws-record.sh` 캡처 확인 후 **AC1 통과 태그**는 B가 push:
+루트에서 `scripts/run-all.sh` 통과 (C 주관, 재분배 후) + `ws-record.sh`(A 작성) 캡처 확인 후 **AC1 통과 태그는 C가 push**:
 ```bash
-git tag walking-skeleton-v1   # B가 push, C는 fetch만
+git tag walking-skeleton-v1   # C가 push (재분배 2026-05-22), A/B는 fetch만
+git push --tags
 ```
 
-### 2.5 커밋
+### 2.5 [신규 책임] `scripts/run-all.sh` 작성 — System Orchestration glue (목표: 2h)
+
+> 재분배(2026-05-22)에 따라 `run-all.sh` owner가 B에서 **C로 이전**. engine startup이 가장 복잡한 (venv 활성, Waitress 기동, p99 자가측정) 요소라 자기 환경에서 가장 자주 돌리는 C가 owner가 자연스러움.
+
+`scripts/run-all.sh`:
 ```bash
-git add python-engine/{app.py,fallback_rules.py}
-git commit -m "C: week1 /classify stub + fallback_rules skeleton (VELXOR_STUB=engine)"
+#!/usr/bin/env bash
+# Velxor walking skeleton 통합 startup — engine + Rust service + UI 일괄 기동
+# Owner: C (재분배 2026-05-22)
+set -euo pipefail
+
+# 작업 디렉토리는 ext4 로컬 — /tmp(tmpfs) 회피
+WORK="${VELXOR_WORK:-$HOME/velxor-work}"
+mkdir -p "$WORK/src" "$WORK/dst"
+
+# 1) Engine — venv 활성 + Waitress 기동 (C)
+(
+  cd python-engine && source .venv/bin/activate
+  VELXOR_STUB="${VELXOR_STUB:-}" python waitress_conf.py
+) &
+ENGINE_PID=$!
+trap 'kill $ENGINE_PID $RUST_PID $UI_PID 2>/dev/null || true' EXIT
+
+# engine health wait
+for i in $(seq 1 30); do
+  curl -sf http://127.0.0.1:8765/health > /dev/null && break
+  sleep 0.5
+done
+
+# 2) Rust service (A의 산출물)
+(
+  cd rust-service && VELXOR_STUB="${VELXOR_STUB:-}" cargo run --release 2> logs/trace.json
+) &
+RUST_PID=$!
+
+# 3) UI (B의 산출물)
+(
+  cd ui && npm run dev
+) &
+UI_PID=$!
+
+# UI ready wait
+until curl -sf http://127.0.0.1:5173 > /dev/null; do sleep 0.5; done
+echo "[run-all] engine=$ENGINE_PID rust=$RUST_PID ui=$UI_PID — all started"
+
+# Smoke: VELXOR_STUB=both 또는 collector 모드면 events.jsonl 한 줄 emit
+if [[ "${VELXOR_STUB:-}" == "both" || "${VELXOR_STUB:-}" == "collector" ]]; then
+  echo '{"schema_version":"1.0","seq":1,"dropped_since_last":0,"pid":1234,"parent_pid":1,"image_path":"/usr/local/bin/smoke","event_type":"FileWrite","file_path":"'"$WORK"'/dst/a.docx","ts_unix_ms":'"$(date +%s%3N)"'}' >> events.jsonl
+fi
+
+sleep 3
+echo "[run-all] OK — VELXOR_STUB='${VELXOR_STUB:-}'"
+wait
+```
+
+```bash
+mkdir -p scripts && chmod +x scripts/run-all.sh
+git update-index --chmod=+x scripts/run-all.sh
+```
+
+> *(C가 owner인 이유)*: engine venv 활성 + Waitress p99 wait + AC4 tracing JSON 출력 위치 결정이 가장 까다로움. A는 Rust critical path에 집중, B는 UI 데모에 집중. `run-all.sh`가 자기 시연 환경에서 가장 자주 돌아가는 C가 자연스러운 owner.
+
+### 2.6 커밋
+```bash
+git add python-engine/{app.py,fallback_rules.py} scripts/run-all.sh
+git commit -m "C: week1 /classify stub + fallback_rules skeleton + run-all.sh orchestration (VELXOR_STUB=engine)"
 git push
 ```
 
-> **Done when**: `VELXOR_STUB=engine` 모드에서 `/classify`가 하드코드 verdict 반환, AC1 tag fetch 성공.
+> **Done when**: `VELXOR_STUB=engine` 모드에서 `/classify`가 하드코드 verdict 반환, `run-all.sh` exit 0, AC1 tag fetch 성공.
 
 ---
 
@@ -234,9 +300,9 @@ git add poc-samples datasets && git commit -m "C: week2 PoC/dataset directory sc
 
 ---
 
-## 4. Week 3 — v1.1 Schema Review 노트 1개 (목표: 1h, **48h 데드라인**)
+## 4. Week 3 — v1.1 Schema Review 노트 1개 (목표: 1h, **48h 데드라인, C=Python DRI**)
 
-B가 v1.1 review 트리거를 보내는 순간부터 **48시간 카운트다운 시작**. 무응답 시 B 단독 발행.
+A가 v1.1 review 트리거를 보내는 순간부터 **48시간 카운트다운 시작**. 무응답 시 A 단독 발행. **C는 Python DRI**로서 `/classify` REST 섹션(req/resp schema, p99 SLA, model_version 컨벤션) 변경이 필요한 경우 본 review에서 명시적으로 제출해야 함 — A가 단독 발행 시 누락되면 v1.x additive로 사후 복구해야 함.
 
 ### 4.1 Python/모델 관점 체크리스트
 다음 중 **최소 1개**를 PR 코멘트로 제출:
@@ -758,10 +824,41 @@ cd ..
 
 > *(Why empty 본문 대신 명시 events)* Flask `request.get_json(silent=True)`는 빈 본문을 `None`으로 돌리지만, 일부 가드가 본문 부재 시 422를 던지도록 미래에 강화될 수 있다. AC8은 "engine이 단독으로 살아있다"는 증명이라 의도된 minimal valid payload로 stress한다.
 
-### 7.5 리허설 3회 참여
-B 주관. C는 `REHEARSAL-LOG.md`에 자기 섹션(엔진 응답 시간, fallback 동작 여부) 기록.
+### 7.5 [신규 책임] `docs/ARCHITECTURE.md` 작성 (목표: 2h)
 
-> **Done when**: `eval-ac5.sh` 출력 + `AC5-results.md` 커밋, `eval-ac4.sh` 출력 정상, `VELXOR_STUB=engine` 단독 smoke pass.
+> 재분배(2026-05-22)에 따라 ARCHITECTURE.md owner가 B에서 **C로 이전**. A는 Rust 깊이 집중, B는 UI 데모 집중. 4계층 전체를 외부 시점에서 글로 풀어내기에 C가 적임 (측정·평가 글쓰기 경험).
+
+`docs/ARCHITECTURE.md` 필수 섹션:
+- **4계층 다이어그램** (Mermaid 또는 ASCII): ① fanotify collector (Rust+A) → ② Rust service (A) → ③ Python engine (C) → ④ React+Electron UI (B)
+- **데이터 흐름 narrative**: fanotify FAN_MODIFY → /proc/<pid> 메타 보강 → BehaviorEventV1 JSONL emit → Rust sliding window 1s/5s burst detection → /classify 호출 → verdict → WS broadcast → UI 빨간 노드 + verdict panel → kill SIGTERM/SIGKILL
+- **Interface Contract 요약**: v1.0 → v1.1 additive 진화, escape hatch `*_v2`, evolution policy
+- **broadcast/replay 분리 의의**: tokio broadcast(live) + 별도 VecDeque(5초 replay) lock-protected — `?last_seq=N` 핸드셰이크가 가능한 이유
+- **VELXOR_STUB 3 모드 표**: unset/collector/engine/both 각각 누가 stub이고 누가 실인지
+- **AC8 stub 영속성 = Walking Skeleton + Interface Evolution Gate의 본질**: A/B/C 어느 한 명이 지연되어도 시연 자체는 항상 가능
+
+```bash
+$EDITOR docs/ARCHITECTURE.md
+git add docs/ARCHITECTURE.md
+git commit -m "C: week8-9 ARCHITECTURE.md (4계층 다이어그램 + 데이터 흐름 + stub 영속성)"
+git push
+```
+
+> B는 발표 슬라이드 UI 섹션에서 본 문서의 다이어그램을 인용한다.
+
+### 7.6 리허설 3회 참여 + `run-all.sh` 안정화
+B 주관. C는 `REHEARSAL-LOG.md`에 자기 섹션(엔진 응답 시간, fallback 동작 여부, `run-all.sh` 기동 시간) 기록.
+
+C의 `run-all.sh`는 3 모드 sweep 자동화:
+```bash
+for mode in '' collector engine both; do
+  echo "=== VELXOR_STUB=${mode:-unset} ==="
+  VELXOR_STUB="$mode" timeout 15 ./scripts/run-all.sh || true
+  ./scripts/ws-record.sh "/tmp/ws-${mode:-real}.jsonl" || true
+  grep -q 'node_add' "/tmp/ws-${mode:-real}.jsonl" && echo "  → AC8($mode) PASS"
+done
+```
+
+> **Done when**: `eval-ac5.sh` 출력 + `AC5-results.md` 커밋, `eval-ac4.sh` 출력 정상, `VELXOR_STUB=engine` 단독 smoke pass, ARCHITECTURE.md 1 commit.
 
 ---
 
@@ -821,31 +918,33 @@ Velxor/
 │   ├── heldout/v3/v3_run_*.jsonl     ✅ (10개)
 │   └── negative/{rsync,unzip,7z,gitclone,npm_install}_*    ✅ (≥10개, Ubuntu)
 ├── scripts/
+│   ├── run-all.sh                    ✅ (신규 owner — engine+rust+ui 통합 startup)
 │   ├── poc-bench.sh                  ✅ AC2
 │   ├── eval-ac4.sh                   ✅ AC4
 │   └── eval-ac5.sh                   ✅ AC5
 └── docs/
+    ├── ARCHITECTURE.md               ✅ (신규 owner — 4계층 다이어그램)
     └── AC5-results.md                ✅ AC5c disclaimer 포함
 ```
 
 ---
 
-## 11. 시간 예산 vs 실제 추적 (자체 ledger)
+## 11. 시간 예산 vs 실제 추적 (자체 ledger, 재분배 후 ~45h)
 
 이 표를 매주 갱신:
 
 | Week | 예산(h) | 실제(h) | 누적(h) | 산출물 태그 |
 |------|---------|---------|---------|------------|
 | 0    | 2       |         |         | `/health` 200 |
-| 1    | 5       |         |         | `walking-skeleton-v1` (B push) |
-| 2-3  | 1       |         |         | v1.1 review 노트 |
+| 1    | 7       |         |         | `walking-skeleton-v1` (C가 run-all.sh로 push), `/classify` stub, run-all.sh (+2h) |
+| 2-3  | 1       |         |         | v1.1 review 노트 (Python DRI) |
 | 4-5  | 0-3     |         |         | (선택) PoC v1 스켈레톤 |
 | 6-7  | 22      |         |         | `ac5-baseline` |
-| 8-9  | 8       |         |         | `AC5-results.md` |
-| 10   | 2       |         |         | slides |
-| **합계** | **~40** | | | |
+| 8-9  | 10      |         |         | `AC5-results.md`, ARCHITECTURE.md (+2h) |
+| 10   | 3       |         |         | slides + 발표 영상 데이터 섹션 (+1h) |
+| **합계** | **~45** | | | (재분배 2026-05-22: +5h — run-all.sh 2h + ARCHITECTURE.md 2h + 발표 섹션 1h) |
 
-> 누적 hours > 1.15 × 40 = 46h 도달 시 즉시 deferral order 발동: 시연 영상(Deferral #4) → 모델 튜닝 단순화 → fallback 영속.
+> 누적 hours > 1.15 × 45 = 52h 도달 시 즉시 deferral order 발동: 시연 영상(Deferral #4) → 모델 튜닝 단순화 → fallback 영속.
 
 ---
 

@@ -10,9 +10,11 @@
   - Iter 1: Architect APPROVE-WITH-IMPROVEMENTS, Critic REVISE → v1 → v2
   - Iter 2: Architect APPROVE-WITH-MINOR-IMPROVEMENTS, Critic APPROVE-WITH-MINOR-IMPROVEMENTS → polish pass → final
 
-> **⚠️ Role 모델 supersede**: 본 문서의 단일-owner ("본인=Rust+UI+Interface Contract owner") 모델은
-> [`role-assignment.md`](./role-assignment.md)의 **3인 균등 분담 (A/B/C)** 으로 대체되었음. 본 문서는 **기술 명세의
-> source of truth**로 유지되며, ownership/시간 분배는 role-assignment.md를 기준으로 따른다.
+> **⚠️ Role 모델 supersede (2026-05-20 → 2026-05-22 재분배)**: 본 문서의 단일-owner ("본인=Rust+UI+Interface Contract owner") 모델은
+> [`role-assignment.md`](./role-assignment.md)의 **3인 분담 (A/B/C)** 으로 대체되었음.
+> - 2026-05-20: 균등 분담 (A=41h collector+저수준 Rust / B=45h Rust integration+UI+Interface Contract / C=40h Python+측정)
+> - **2026-05-22 (Iteration 5)**: 사용자 지시 "Rust 전부 A / B UI만 / C 필요시 변경"에 따라 **A=62h(모든 Rust 단일 소유, critical path) / B=32h(UI 풀스택 + 발표 퀄리티) / C=45h(Python + System Orchestration glue + Python contract DRI + ARCHITECTURE.md)** 로 재분배. 합계 ~139h, deferral 트리거 145h에 ~6h 여유.
+> 본 문서는 **기술 명세의 source of truth**로 유지되며, ownership/시간 분배는 role-assignment.md를 기준으로 따른다.
 
 > **⚠️ OS Migration (2026-05-21)**: 원안의 Windows kernel minifilter(C+WDK) layer ①이 **Ubuntu 24.04 + Rust libfanotify userspace collector**로 대체됨. kernel module 미사용, BSOD/test-signing 의존성 제거, identity는 "사용자공간 행위 탐지기"로 약화. `BehaviorEventV1` wire 포맷은 유지(UTF-16LE → UTF-8, MAX_PATH 520 → PATH_MAX 4096만 변경)되어 layer ②/③/④는 입력 측면에서 동일. AC6 차단은 `TerminateProcess` 시퀀스에서 `kill(pid, SIGTERM/SIGKILL)`로 치환. 자세한 영향은 본 문서 곳곳의 *(Migration)* 인라인 노트 참조.
 
@@ -89,6 +91,7 @@
 2. 2.2 Threat Timeline (D3) → 간단 리스트 뷰로 대체
 3. 8.1 자동 차단 → Block 버튼 수동 차단만 유지
 4. 10.2 백업 시연 영상
+5. **(Iteration 5 추가)** AC4 tracing instrumentation 단순화 — A의 4개 timestamp(event_received_ts/ws_sent_ts/classify_start_ts/classify_end_ts) 중 **event→ws 2개만** 유지. classify p99는 C의 자체측정으로 대체.
 
 ## Implementation Steps
 
@@ -285,7 +288,7 @@ Velxor/
 
 ## ADR
 
-**Decision**: Walking Skeleton + Interface Evolution Gate. Interface Contract owner = B ([`role-assignment.md`](./role-assignment.md) 참조); Week 0 환경 셋업 (additive) → Week 1 v1-draft + 4계층 stub end-to-end → Week 3 async v1.1 review (48h, 무응답 시 B 단독) → Week 4+ Stub Retention Gate(env flag `VELXOR_STUB`로 stub code-path 영속) → Week 8-9 통합/측정 → Week 10 발표.
+**Decision**: Walking Skeleton + Interface Evolution Gate. Interface Contract 발행 주관 = **A** (A=Rust DRI, C=Python DRI, B=UI consumer review — Iteration 5 재분배 결과; [`role-assignment.md`](./role-assignment.md) 참조); Week 0 환경 셋업 (additive) → Week 1 v1-draft + 4계층 stub end-to-end → Week 3 async v1.1 review (48h, 무응답 시 **A** 단독 발행) → Week 4+ Stub Retention Gate(env flag `VELXOR_STUB`로 stub code-path 영속) → Week 8-9 통합/측정 → Week 10 발표.
 
 **Drivers**:
 1. 시간 제약 (≤126h ceiling 공식 조정, deferral 트리거 145h)
@@ -301,9 +304,9 @@ Velxor/
 
 **Why chosen**: 시간/통합/시연/팀원 4 driver를 모두 충족하는 유일한 옵션. v1.1 evolution gate가 pure WS의 "premature freeze" 약점을 완화하면서도 Module-First의 통합 폭풍을 회피. Stub Retention Gate가 팀원 지연을 흡수하면서도 통합 포인트 검증 가능성을 유지.
 
-**Consequences**:
-- 긍정: B가 system integrator 역할 (학습 큼), 매주 시연 가능, stub fallback이 곧 demo backup, 인터페이스 스키마가 산출물. (A/B/C 분담은 [`role-assignment.md`](./role-assignment.md))
-- 부정: Week 0+1 부하 집중 (~21-23h); 무응답 작업자의 입력은 자동 누락(Principle 4 의도된 trade); v1.0 wrong-typed 필드는 `*_v2` parallel field로 우회해야 함 (escape hatch).
+**Consequences** (Iteration 5 재분배 반영):
+- 긍정: **A가 Rust 풀스택 + Interface Contract Rust DRI = system integrator 역할** (학습 큼), 매주 시연 가능, stub fallback이 곧 demo backup, 인터페이스 스키마가 산출물. C가 `run-all.sh` orchestration + Python contract DRI + ARCHITECTURE.md를 흡수해 A의 통합 검증 부담을 분담. B는 UI 풀스택 + 발표 퀄리티 4종(DEMO-SCRIPT/AC3/리허설/영상)에 집중.
+- 부정: **A 단독 critical path 단일 점 risk** — Week 4 종료 시 Rust 본구현 미완 시 B/C는 stub 영속으로 격리되지만 A가 막히면 전체 통합이 멈춤. Mitigation: A의 Week 0+1 부하(~25h) 학기 시작 ≥1주 전 사전 흡수 + C의 통합 검증 분담. Week 0+1 부하 집중은 종전과 유사하지만 A 측에 더 무거움. 무응답 작업자의 입력은 자동 누락(Principle 4 의도된 trade); v1.0 wrong-typed 필드는 `*_v2` parallel field로 우회 (escape hatch).
 
 **Follow-ups**:
 - Week 0 종료: tooling install AC (0.1-0.6) + fanotify smoke sign-off (+ inotify 백업 경로 캡처)
@@ -346,14 +349,50 @@ Velxor/
 - **영향**: identity 한 줄(README)이 "Windows 커널 백신" → "Linux 사용자공간 행위 탐지기"로 약화. AC5c disclaimer에 *"Evaluated on Linux/ext4 + fanotify userspace collector; Windows NTFS/minifilter behavior may differ."* 추가. `BehaviorEventV1` JSONL wire 포맷은 보존되어 layer ②/③/④ 코드는 입력 측 어댑터 외 변경 없음.
 - **잠재 follow-up (선택)**: LSM/eBPF 강화 → 정체성 회복(현재는 future work)
 
+### Iteration 5 (Role Rebalance — Rust 전부 A, B는 UI만, C 흡수, 2026-05-22)
+- **사용자 지시**: "rust 관련 사항을 전부 A에게 위임 / B는 UI 부분만 담당 / C도 변경이 필요하면 변경하라"
+- **CCG**: Codex + Gemini 양 advisor 호출 성공 (Iteration 3/4의 partial fallback과 달리 두 advisor 모두 응답). 합의점:
+  (1) **Interface Contract = 공동 소유** (A=Rust DRI / C=Python `/classify` DRI / B=UI consumer review). 단독 A 소유 시 contract drift 위험
+  (2) `scripts/run-all.sh` → **C로 위임** (engine startup이 가장 복잡한 orchestration anchor)
+  (3) `scripts/ws-record.sh`, `scripts/ac6-verify-block.sh` → A (WS 서버 / kill 시퀀스 owner)
+  (4) AC4 tracing instrumentation의 Rust 코드 변경 → A (측정 정의·해석은 C 공동 검토)
+  (5) B가 UI 코드만 하면 DEMO-SCRIPT / AC3 evidence / 리허설 코디네이션 / 발표 영상이 누락됨 → B의 잉여 시간을 발표 퀄리티 4종으로 흡수
+  (6) `docs/ARCHITECTURE.md` → C로 이전 (A는 Rust 깊이, B는 UI 데모 집중; 4계층 외부 시점 글은 C 측 측정·평가 글쓰기 경험과 정합)
+  (7) A timeline 형식 = **체크리스트 폐기 → Copy-Paste Runnable 상세 + critical path 의존성 다이어그램** (Gemini "checklist 불가능" 권고 수용)
+- **새 Hour Ledger**:
+  | 작업자 | 시간 | 변동 (vs 2026-05-20) | 핵심 변화 |
+  |---|---|---|---|
+  | A | ~62h | +21h | 모든 Rust 단일 소유 (collector + integration service + classifier_client + ws_broadcaster + tracing) + Interface Contract Rust DRI + ws-record.sh + ac6-verify-block.sh |
+  | B | ~32h | -13h | UI 풀스택만 + DEMO-SCRIPT + AC3 evidence + 리허설 코디네이션 + 발표 영상 + 슬라이드 UI 섹션 + footgun 문서 |
+  | C | ~45h | +5h | 기존 + scripts/run-all.sh + Python contract DRI + docs/ARCHITECTURE.md |
+  | **Total** | **~139h** | +13h vs 종전 126h | deferral 트리거 145h에 ~6h 여유 |
+- **CODEOWNERS 권장 (재분배 반영)**:
+  - `rust-service/**` → @A
+  - `python-engine/**`, `scripts/run-all.sh`, `scripts/eval-*.sh`, `scripts/poc-bench.sh`, `docs/ARCHITECTURE.md`, `docs/AC5-results.md` → @C
+  - `ui/**`, `docs/DEMO-SCRIPT.md`, `docs/AC3-evidence/**`, `docs/REHEARSAL-LOG.md`, `docs/electron-ws-footgun.md` → @B
+  - `contracts/interface-schema.md` → @A @C (Rust + Python DRI 공동)
+  - `scripts/ws-record.sh`, `scripts/ac6-verify-block.sh` → @A
+- **AC8 stub 모드 검증 책임 재분배**: A=collector + both, C=engine, B=UI 측 ack (UI는 stub 모드 무관하게 동일 동작)
+- **새 Top Risks (Iteration 5에서 추가)**:
+  1. **A 단독 critical path 병목** (High/High) — Week 4 종료 시 Rust 본구현 미완 시 트리거. Mitigation: C의 `run-all.sh`로 통합 검증 부담 분담; B/C는 각자 stub 영속; A의 Week 0~25h 부하 학기 시작 ≥1주 전 사전 흡수.
+  2. **Interface Contract drift (A 주관 단독 발행)** (Medium/Medium) — A=Rust DRI / C=Python DRI 명시 + v1.1 48h review 강제로 완화.
+  3. **Integration verification 공백 (B가 UI 코드만)** (Medium/Medium) — C의 3 모드 stub sweep + B의 e2e smoke로 분산.
+- **새 Deferral Order #5 추가**: AC4 tracing instrumentation 단순화 — A의 4개 timestamp 중 event→ws 2개만 유지.
+- **영향**: 본 문서의 ADR 단일 owner 표현은 위 Iteration 5 표를 따라 해석. `BehaviorEventV1` JSON wire 포맷, AC1-AC8 정의, Walking Skeleton + Interface Evolution Gate, Stub Retention Gate, `*_v2` escape hatch, AC5a/b/c 정책 등 **기술 명세는 변경 없음**. 변경은 **ownership·시간 분배·산출물 owner 매핑·CODEOWNERS·Risk Table**에 국한.
+- **잠재 follow-up (선택)**: Iteration 6 후보 — eBPF LSM(aya-rs) 경로로 정체성 회복(현재 future work). A의 추가 +12-18h 발생 시 deferral 트리거 145h 충돌 가능성 평가 필요.
+
 ### Final wording pass (applied to this final plan)
-1. AC8: `VELXOR_STUB=driver`, `=engine`, `=both` 3 모드 모두 검증 ✓
-2. IOCTL: `FltSendMessage` 비차단 수신 thread 노트 ✓
+1. AC8: `VELXOR_STUB=driver`, `=engine`, `=both` 3 모드 모두 검증 ✓ (Iteration 4에서 `driver` → `collector` rename, AC8 책임 = A=collector+both / C=engine — Iteration 5)
+2. IOCTL: `FltSendMessage` 비차단 수신 thread 노트 ✓ (Iteration 4에서 UNIX socket으로 마이그레이션 후 무관)
 3. Evolution policy: `*_v2` parallel field escape hatch ✓
 4. WS: broadcast = live fan-out, replay = separate `VecDeque` ✓
-5. `VELXOR_STUB` semantics 표로 명시 ✓
+5. `VELXOR_STUB` semantics 표로 명시 ✓ (Iteration 5에서 owner = A=Rust 측 / C=Python 측)
 6. "Stub Deprecation Gate" → "Stub Retention Gate" ✓
 7. Hour ledger 트리거 명확화: 트리거 = >145h (126h × 1.15), 124h ≠ 트리거 ✓ *(Iteration 3에서 120h ceiling을 126h로 공식 조정함에 따라 트리거도 138h → 145h로 재계산)*
+8. **(Iteration 5)** ADR Decision의 "Interface Contract owner = B" → **A 주관 발행, A=Rust DRI / C=Python DRI / B=UI consumer review** ✓
+9. **(Iteration 5)** Consequences의 "B가 system integrator" → **A가 critical path 단일 점**으로 갱신, C가 orchestration glue로 분담 ✓
+10. **(Iteration 5)** Deferral Order #5 신규 추가: AC4 tracing instrumentation 단순화 (event→ws 2개만 유지) ✓
+11. **(Iteration 5)** AC1 `walking-skeleton-v1` tag push 주체 = **C** (run-all.sh owner 이전에 따른 자연스러운 매핑) ✓
 
 ## Status
 
