@@ -162,6 +162,10 @@ UI_PID=$!
 | `blocker.rs:82` | VELXOR_BLOCK_TOKEN 인증 헤더 | block endpoint 보호 |
 | `blocker.rs:88` | ConcurrencyLimitLayer 16 | 동시 block 폭주 방어 |
 
+위 항목 다수는 §4.7 sweep + 후속 deferred-TODO 일괄 소화 (commit `a8c936f`)에서 이미 해소됨. 잔여 2건 (blocker.rs 토큰 비교 timing-safe, aggregator.rs broadcast lag 측정)은 의도적 defer.
+
+§4.7 sweep 시 FAN_RENAME mask는 init flag로 `FAN_REPORT_FID/DIR_FID/DFID_NAME` 중 하나를 요구함이 확인되어 EINVAL이 발생, mask에서 제거함. **FileRename 감지는 v1.1 schema collation 합의 (2026-05-24) 시 FAN_REPORT_DFID_NAME class 전환과 함께 본격 구현 예정.** event metadata layout 전체 재작성 필요 (no per-event fd, name이 `FAN_EVENT_INFO_TYPE_*`로 전달).
+
 Week 8-9 §5 (자동 차단 + tracing instrumentation + 리허설)에서 다수 해소 예정.
 
 ---
@@ -183,3 +187,30 @@ Week 8-9 §5 (자동 차단 + tracing instrumentation + 리허설)에서 다수 
 이 문서에 관한 질문 / 인터페이스 변경 제안:
 - 본 문서 PR comment, 또는 `contracts/v1.1-review-trigger.md` 동일 채널
 - v1.1 schema collation (2026-05-24 마감)과 별개로 운영 합의는 즉시 반영 가능
+
+---
+
+## 11. §4.7 sweep 검증 결과 (2026-05-22)
+
+세 모드 모두 PASS — `~/velxor-work/sweep-{both,collector,real}/` 에 아티팩트.
+
+| Mode | 트리거 | node_add | verdict | 결과 |
+|---|---|---|---|---|
+| `VELXOR_STUB=both` | events.jsonl 60건 FileWrite burst | 60 | 1 (0.95) | **PASS** |
+| `VELXOR_STUB=collector` | 동일 | 60 | 1 (0.95) | **PASS** |
+| unset (실 fanotify, sudo) | `touch + echo > ~/velxor-work/src/foo` | 36,097 (6초) | 6 | **PASS** |
+
+**관찰 사항**:
+- FAN_MARK_MOUNT가 `/home` mount 전체를 마크 → 시스템 전반 파일 활동 유입 (6000 ev/s). 데모 범위에선 무관하지만, Week 8-9 §5 stress 시 per-dir mark 또는 path filter 검토 필요.
+- 단명 PID 시 `image_path:"<unknown:pid=N>"` sentinel 정상 동작 (Worker-A v1.1 note #4).
+- verdict cache TTL 1s × multi-PID burst → 6초간 6 verdict (PID당 1초 1회 상한).
+
+재현:
+```bash
+# stub 2 모드
+bash ~/velxor-work/sweep-mode.sh both both
+bash ~/velxor-work/sweep-mode.sh collector collector
+# 실 fanotify (sudo)
+bash ~/velxor-work/sweep-fanotify.sh
+```
+(스크립트는 워크 dir 외부 인프라 — 리포지토리 미포함. C의 `run-all.sh` 와는 별개.)

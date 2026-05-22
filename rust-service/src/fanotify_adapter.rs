@@ -48,13 +48,16 @@ pub async fn run_fanotify(
         EventFFlags::O_RDONLY | EventFFlags::O_NONBLOCK,
     )?;
 
-    // FAN_RENAME requires kernel >= 5.17. Ubuntu 24.04 ships 6.8 so we always
-    // request it; if a future port lands on an older kernel, `mark()` will EINVAL
-    // and we'll need to retry without FAN_RENAME (TODO documented below).
+    // FAN_RENAME (kernel 5.17+) requires the fanotify fd be opened with one of
+    // FAN_REPORT_FID / FAN_REPORT_DIR_FID / FAN_REPORT_DFID_NAME — otherwise
+    // fanotify_mark() returns EINVAL. We deliberately stay on the fd-reporting
+    // path (no FID class) for Week 4-5 because FID events have a different
+    // metadata layout (no per-event fd, name carried in FAN_EVENT_INFO_TYPE_*).
+    // FileRename detection is deferred to v1.1 schema collation when B/C agree
+    // on the DFID_NAME event shape.
     let mask = MaskFlags::FAN_MODIFY
         | MaskFlags::FAN_CLOSE_WRITE
-        | MaskFlags::FAN_OPEN_EXEC
-        | MaskFlags::FAN_RENAME;
+        | MaskFlags::FAN_OPEN_EXEC;
 
     fan.mark(
         MarkFlags::FAN_MARK_ADD | MarkFlags::FAN_MARK_MOUNT,
@@ -227,11 +230,10 @@ fn build_payload(ev: &FanotifyEvent, dropped_since_last: u32, seq: u64, event_ty
 }
 
 /// Returns `Some(event_type)` for known mask flags, `None` for unmatched masks.
-/// Schema enum is closed: {FileWrite, FileRename, ProcessCreate}.
+/// Schema enum {FileWrite, FileRename, ProcessCreate}; FileRename deferred to
+/// v1.1 (requires FAN_REPORT_DFID_NAME init class — see init-flags comment).
 fn classify_event_type(mask: MaskFlags) -> Option<&'static str> {
-    if mask.contains(MaskFlags::FAN_RENAME) {
-        Some("FileRename")
-    } else if mask.contains(MaskFlags::FAN_OPEN_EXEC) {
+    if mask.contains(MaskFlags::FAN_OPEN_EXEC) {
         Some("ProcessCreate")
     } else if mask.contains(MaskFlags::FAN_MODIFY) || mask.contains(MaskFlags::FAN_CLOSE_WRITE) {
         Some("FileWrite")
