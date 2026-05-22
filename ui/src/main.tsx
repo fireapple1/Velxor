@@ -1,11 +1,10 @@
-import { app, BrowserWindow } from "electron";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./index.css";
 
-app.whenReady().then(() => {
-  const win = new BrowserWindow({
-    width: 1280, height: 800,
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
-  });
-  win.loadURL("http://127.0.0.1:5173");
-});
-
-app.on("window-all-closed", () => app.quit());
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);

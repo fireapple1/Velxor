@@ -147,8 +147,9 @@ pub async fn run(
                                             seq: alert_s,
                                             r#type: "alert".to_string(),
                                             payload: serde_json::json!({
-                                                "block_result": block_result,
-                                                "reason": "auto_block_ransomware",
+                                                "pid": pid,
+                                                "severity": "warn",
+                                                "message": format!("auto_block_ransomware: {}", block_result),
                                             }),
                                         };
                                         replay2.push(alert_msg.clone()).await;
@@ -156,11 +157,15 @@ pub async fn run(
                                     }
 
                                     let s = seq2.fetch_add(1, Ordering::Relaxed);
+                                    let mut payload = result;
+                                    if let Some(obj) = payload.as_object_mut() {
+                                        obj.insert("pid".into(), serde_json::json!(pid));
+                                    }
                                     let verdict_msg = WsMessage {
                                         schema_version: "1.0".to_string(),
                                         seq: s,
                                         r#type: "verdict".to_string(),
-                                        payload: result,
+                                        payload,
                                     };
                                     replay2.push(verdict_msg.clone()).await;
                                     // Ignore send error — no subscribers is not fatal

@@ -122,7 +122,7 @@ A의 `ws_broadcaster.rs` `tokio::net` `127.0.0.1:7000` → B의 UI.
 |---|---|---|
 | `node_add` | `BehaviorEventV1` 한 건 | collector → 신규 이벤트 |
 | `node_update` | `{pid, fields:{...}}` | 동일 PID 상태 변화 |
-| `verdict` | `/classify` response (§2.2) | aggregator burst → classify 결과 |
+| `verdict` | `/classify` response (§2.2) + `{pid}` 주입 | aggregator burst → classify 결과 |
 | `alert` | `{pid, severity, message}` | block 시도 전후, 운영 알림 |
 | `gap` | `{from: u64, to: u64}` | replay buffer evict로 N+1 누락 시 |
 
