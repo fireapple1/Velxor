@@ -82,11 +82,12 @@ UI_DIR="$REPO_ROOT/ui"
 # ── 2. Electron main 컴파일 (캐싱) ────────────────────────────
 echo "[2/6] Electron main 컴파일 확인 중..."
 
-MAIN_JS="$UI_DIR/dist-electron/electron/main.js"
+MAIN_JS="$UI_DIR/dist-electron/main.js"
 if [[ ! -f "$MAIN_JS" ]]; then
-  echo "  → dist-electron/electron/main.js 없음, 컴파일 시작..."
-  if ! ( cd "$UI_DIR" && npx tsc --target es2022 --module commonjs \
-          --moduleResolution node --esModuleInterop --skipLibCheck \
+  echo "  → dist-electron/main.js 없음, 컴파일 시작..."
+  if ! ( cd "$UI_DIR" && npx tsc --ignoreConfig --ignoreDeprecations 6.0 \
+          --target es2022 --module commonjs --moduleResolution node \
+          --esModuleInterop --skipLibCheck \
           --outDir dist-electron electron/main.ts ); then
     echo "[record] ERROR: Electron main.ts 컴파일 실패" >&2
     exit 1
@@ -117,7 +118,7 @@ echo "  ✓ Xvfb :99 기동 완료 (PID=$XVFB_PID)"
 
 # ── 4. Electron 기동 ──────────────────────────────────────────
 echo "[4/6] Electron 기동 중..."
-setsid bash -c "cd '$UI_DIR' && DISPLAY=:99 npx electron dist-electron/electron/main.js --no-sandbox" >/dev/null 2>&1 &
+setsid bash -c "cd '$UI_DIR' && DISPLAY=:99 npx electron dist-electron/main.js --no-sandbox" >/dev/null 2>&1 &
 ELECTRON_PGID=$!
 echo "[record] Electron 창 표시 대기..."
 if ! DISPLAY=:99 timeout 10 bash -c 'until xdotool search --name "." >/dev/null 2>&1; do sleep 0.3; done'; then
@@ -138,11 +139,21 @@ echo "  ✓ ffmpeg 녹화 중 (PID=$FFMPEG_PID)"
 # ── 6. burst 트리거 (5초 후) ──────────────────────────────────
 echo "[6/6] 5초 후 burst 트리거 예정..."
 sleep 5
-echo "  → burst 파일 100개 생성 중..."
+echo "  → burst 200 files (단일 PID, python urandom)..."
 mkdir -p "$HOME/velxor-work/dst"
-for i in $(seq 1 100); do
-  dd if=/dev/urandom of="$HOME/velxor-work/dst/ransom_$i.enc" bs=1k count=4 2>/dev/null
-done
+# 핵심: aggregator.PidWindow가 PID별 분리이므로 동일 PID가 50+ files/1s 만들어야 burst 트리거.
+# dd 100개 spawn은 100 PIDs × 1 file → fail. python 한 프로세스가 200 files 작성.
+python3 -c "
+import os, time
+home = os.environ['HOME']
+dst = f'{home}/velxor-work/dst'
+os.makedirs(dst, exist_ok=True)
+t0 = time.time()
+for i in range(200):
+    with open(f'{dst}/ransom_{i}.enc', 'wb') as f:
+        f.write(os.urandom(4096))
+print(f'  ✓ 200 files in {time.time()-t0:.2f}s (single PID burst)')
+"
 echo "  ✓ burst 트리거 완료 (fanotify → /classify → verdict 기대)"
 
 # ── ffmpeg 완료 대기 ──────────────────────────────────────────
