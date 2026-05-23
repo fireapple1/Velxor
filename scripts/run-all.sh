@@ -56,8 +56,14 @@ for i in $(seq 1 30); do
 done
 
 # 2) Rust service (A의 산출물)
+# setcap 적용된 release binary 우선 — cargo run 은 재빌드 시 cap 손실
 (
-  cd rust-service && VELXOR_STUB="${VELXOR_STUB:-}" cargo run --release 2> logs/trace.json
+  cd rust-service
+  if [ -x target/release/rust-service ]; then
+    VELXOR_STUB="${VELXOR_STUB:-}" ./target/release/rust-service 2> logs/trace.json
+  else
+    VELXOR_STUB="${VELXOR_STUB:-}" cargo run --release 2> logs/trace.json
+  fi
 ) &
 RUST_PID=$!
 
