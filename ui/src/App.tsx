@@ -1,10 +1,10 @@
-import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Edge } from "@xyflow/react";
 import { ProcessTree } from "./components/ProcessTree";
 import type { VelxorNode, VelxorNodeData, VelxorNodeState } from "./components/ProcessTree";
 import { DetailPanel } from "./components/DetailPanel";
 import { Timeline } from "./components/Timeline";
+import { Sidebar } from "./components/Sidebar";
 import type { TimelineEvent } from "./components/Timeline";
 import { useVelxorWs } from "./ws/client";
 import type { ConnectionState } from "./ws/client";
@@ -163,11 +163,12 @@ export default function App() {
         width: "100vw",
         display: "flex",
         flexDirection: "column",
-        background: "#0a0a0c",
+        background: "#0B0F14",
       }}
     >
       <Header connection={connectionState} alerts={alerts} />
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        <Sidebar />
         <div style={{ flex: 3, minWidth: 0 }}>
           <ProcessTree
             nodes={nodes}
@@ -195,31 +196,32 @@ function Header({ connection, alerts }: { connection: ConnectionState; alerts: A
   return (
     <div
       style={{
-        height: HEADER_H,
         flexShrink: 0,
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 12px",
-        background: "#0a0a0c",
-        borderBottom: "1px solid #00ffcc33",
+        borderBottom: "1px solid #1E2936",
+        background: "rgba(11,15,20,0.92)",
+        backdropFilter: "blur(12px)",
+        height: 44,
+        padding: "0 16px",
       }}
     >
-      <div style={{ color: "#00ffcc", fontWeight: 700, letterSpacing: 2 }}>VELXOR</div>
+      <div style={{ color: "#E6EDF3", fontSize: 18, letterSpacing: 1.5, fontWeight: 700 }}>VELXOR</div>
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <AlertStrip alerts={alerts} />
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span
             style={{
-              width: 8,
-              height: 8,
+              width: 7,
+              height: 7,
               borderRadius: 4,
               background: dotColor,
-              boxShadow: `0 0 6px ${dotColor}`,
+              boxShadow: "none",
               display: "inline-block",
             }}
           />
-          <span style={{ color: "#00ffcc99", fontSize: 11 }}>{connection}</span>
+          <span style={{ color: "#8B949E", fontSize: 11 }}>{connection}</span>
         </div>
       </div>
     </div>
@@ -239,12 +241,27 @@ function AlertStrip({ alerts }: { alerts: AlertEntry[] }) {
           key={`${a.seq}-${a.ts}-${a.pid}`}
           title={a.message}
           style={{
-            fontSize: 10,
+            fontSize: 11,
+            fontWeight: 500,
             color:
               a.severity === "error" ? "#ff3333" : a.severity === "warn" ? "#ffcc00" : "#00ffcc99",
-            border: `1px solid ${a.severity === "error" ? "#ff333355" : a.severity === "warn" ? "#ffcc0055" : "#00ffcc33"}`,
-            padding: "2px 6px",
-            borderRadius: 3,
+            background:
+              a.severity === "error"
+                ? "rgba(255,77,79,0.12)"
+                : a.severity === "warn"
+                ? "rgba(255,204,0,0.12)"
+                : "rgba(0,194,255,0.08)",
+
+            border: `1px solid ${
+              a.severity === "error"
+                ? "rgba(255,77,79,0.25)"
+                : a.severity === "warn"
+                ? "rgba(255,204,0,0.25)"
+                : "rgba(0,194,255,0.18)"
+            }`,
+
+            padding: "6px 10px",
+            borderRadius: 10,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",

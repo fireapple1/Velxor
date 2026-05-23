@@ -1,9 +1,17 @@
-body, html, #root {
+body,
+html,
+#root {
   margin: 0;
   padding: 0;
-  background: #0a0a0c;
-  color: #00ffcc;
-  font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", Menlo, Monaco, Consolas, monospace;
+
+  background: #0b0f14;
+  color: #e6edf3;
+
+  font-family:
+    "JetBrains Mono",
+    "Fira Code",
+    monospace;
+
   font-size: 13px;
   height: 100%;
   overflow: hidden;

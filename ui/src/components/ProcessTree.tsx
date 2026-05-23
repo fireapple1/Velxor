@@ -27,17 +27,29 @@ const NODE_H = 44;
 function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
   const base: React.CSSProperties = {
     width: NODE_W,
-    height: NODE_H,
-    padding: "8px 12px",
-    borderRadius: 4,
+
+    minHeight: NODE_H,
+
+    padding: "12px",
+
+    borderRadius: 12,
+
     fontFamily: "inherit",
     fontSize: 12,
+
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
+
     overflow: "hidden",
+
     whiteSpace: "nowrap",
     textOverflow: "ellipsis",
+
+    transition:
+      "border-color 0.2s ease, background 0.2s ease",
+
+    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
   };
 
   let style: React.CSSProperties;
@@ -46,38 +58,45 @@ function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
   if (data.state === "threat") {
     style = {
       ...base,
-      background: "#1a0505",
-      border: "2px solid #ff3333",
-      color: "#ff3333",
-      animation: "pulse 0.8s infinite",
+      background: "rgba(255,77,79,0.08)",
+      border: "1px solid #FF4D4F",
+      color: "#FF4D4F",
     };
   } else if (data.state === "killed") {
     style = {
       ...base,
-      background: "#444",
-      border: "2px solid #666",
-      color: "#999",
-      animation: "none",
+      background: "#161B22",
+      border: "1px solid #30363D",
+      color: "#8B949E",
+      opacity: 0.55,
+      filter: "grayscale(0.4)",
     };
     className = "velxor-node-killed";
   } else {
     style = {
       ...base,
-      background: "#2a2a2a",
-      border: "2px solid #00ffcc",
-      color: "#00ffcc",
+      background: "#121821",
+      border: "1px solid #1E2936",
+      color: "#E6EDF3",
     };
   }
 
   return (
     <div style={style} className={className}>
-      <Handle type="target" position={Position.Top} style={{ background: "#00ffcc", border: "none" }} />
+      <Handle type="target" position={Position.Top} style={{
+        background: "#00C2FF",
+        border: "none",
+
+        width: 8,
+        height: 8,
+      }}/>
       <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{data.label}</div>
       {typeof data.image_path === "string" && (
         <div
           style={{
             fontSize: 10,
-            opacity: 0.7,
+            opacity: 0.6,
+            color: "#8B949E",
             overflow: "hidden",
             textOverflow: "ellipsis",
           }}
@@ -85,7 +104,13 @@ function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
           {data.image_path.split("/").pop()}
         </div>
       )}
-      <Handle type="source" position={Position.Bottom} style={{ background: "#00ffcc", border: "none" }} />
+      <Handle type="source" position={Position.Bottom} style={{
+        background: "#00C2FF",
+        border: "none",
+
+        width: 8,
+        height: 8,
+      }}/>
     </div>
   );
 }
@@ -115,10 +140,22 @@ export function ProcessTree({ nodes, edges, onSelect }: Props) {
       nodeTypes={nodeTypes}
       onNodeClick={(_, n) => onSelect(n as VelxorNode)}
       fitView
-      style={{ background: "#0a0a0c" }}
+      style={{
+        background: "#0B0F14",
+
+        backgroundImage: `
+          linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)
+        `,
+
+        backgroundSize: "32px 32px",
+      }}
       proOptions={{ hideAttribution: false }}
     >
-      <Background color="#00ffcc22" gap={20} />
+      <Background
+        color="rgba(255,255,255,0.04)"
+        gap={32}
+      />
       <Controls />
     </ReactFlow>
   );
