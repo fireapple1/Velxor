@@ -19,15 +19,20 @@ Usage (repo root, venv 활성화 후):
 """
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# 결정성 (Codex audit #9): time.time() 대신 fixed epoch + (variant_idx + run_idx) 파생
+# t_start_ms = BASE_TS_MS + (variant_idx * 1_000_000) + (run_idx * 10_000)
+# bucket boundary (1s) 와 run 간 충돌 회피 위해 stride 10s 부여.
+BASE_TS_MS = 1779_000_000_000  # 2026-05-23 ~ (안정 epoch)
+VARIANT_TS_STRIDE_MS = 1_000_000  # variant 간 격리
+RUN_TS_STRIDE_MS = 10_000          # run 간 격리
 
 # simulate.py 의 dst_ext 는 풀에서 random — gen 측은 stdout 의 DST_EXT 라인을 읽어 glob.
 # src_ext 는 simulate 가 사전 생성하는 source 파일 확장자 (rename 전).
@@ -62,8 +67,12 @@ def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{variant}_run_{run_idx:02d}.jsonl"
 
+    variant_idx = list(VARIANT_RULES.keys()).index(variant)
+    t_start_ms = (BASE_TS_MS
+                  + variant_idx * VARIANT_TS_STRIDE_MS
+                  + run_idx * RUN_TS_STRIDE_MS)
+
     with tempfile.TemporaryDirectory(prefix=f"velxor-{variant}-") as tmp:
-        t_start_ms = int(time.time() * 1000)
         # --seed=run_idx → 재현 가능, 단 매 run 별 다른 분포.
         result = subprocess.run(
             [sys.executable, str(rule["simulate"]), tmp,
@@ -73,7 +82,6 @@ def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
         m = AC2_RE.search(result.stdout)
         if not m:
             raise RuntimeError(f"{variant}: AC2_MEASURED_MS missing in simulate output")
-        elapsed_ms = float(m.group(1))
         em = DST_EXT_RE.search(result.stdout)
         if not em:
             raise RuntimeError(f"{variant}: DST_EXT missing in simulate output")
@@ -85,16 +93,21 @@ def synth_one_run(variant: str, count: int, run_idx: int) -> Path:
             raise RuntimeError(f"{variant}: 0 dst files matched *{dst_ext} in {tmp}")
         # count 는 jitter 됨 — 입력 base 와 일치 강제 X.
 
-        pid = os.getpid()
-        parent_pid = os.getppid()
-        image_path = sys.executable
+        # 결정성 (Codex audit #9): pid 는 sentinel, file_path 는 synthetic prefix.
+        # tempfile.TemporaryDirectory 는 OS-random suffix 라 실 경로 그대로 emit 하면
+        # 매 run 다른 string → byte non-identical. ext_diversity 만 추출되므로 prefix 무관.
+        pid = 10000 + variant_idx * 100 + run_idx
+        parent_pid = 1
+        image_path = f"/synthetic/positive-{variant}"
+        synthetic_dir = f"/synthetic/{variant}/run_{run_idx:02d}"
+        synthetic_spread_ms = max(actual_count * 0.1, 10.0)
         events = []
         seq = 0
         for i, dst in enumerate(dst_files):
-            ts = t_start_ms + int((i / actual_count) * elapsed_ms)
+            ts = t_start_ms + int((i / actual_count) * synthetic_spread_ms)
             base = dst.name[: -len(dst_ext)]
-            src_path = str(dst.parent / f"{base}{rule['src_ext']}")
-            dst_path = str(dst)
+            src_path = f"{synthetic_dir}/{base}{rule['src_ext']}"
+            dst_path = f"{synthetic_dir}/{dst.name}"
 
             seq += 1
             events.append({

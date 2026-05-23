@@ -5,10 +5,13 @@ LR 모델이 '암기' 가 아닌 'sliding window 통계' 를 학습하도록.
 
 학습/평가 결정성을 유지하려면 simulate 호출 전 random.seed() 를 외부에서 고정.
 gen-positive.py 가 run_idx 별로 seed 를 주입한다.
+
+결정성 (Codex audit #9, AC5 v3.1+): 모든 byte payload 는 `random.randbytes()` 사용
+(이전 `secrets.token_bytes` 는 OS entropy 라 seed 무관). 같은 seed 면 file_size /
+content / 충돌 회피 idx 모두 비트 재현 가능.
 """
 import os
 import random
-import secrets
 from pathlib import Path
 
 NAME_POOL = ("doc", "report", "note", "file", "data", "memo", "draft", "letter")
@@ -38,11 +41,11 @@ def gen_source_files(target_dir: Path, count: int, src_ext: str,
     for i in range(count):
         size = rand_size()
         body_len = max(0, size - len(header))
-        payload = header + secrets.token_bytes(body_len)
+        payload = header + random.randbytes(body_len)
         p = target_dir / f"{rand_name(i)}{src_ext}"
-        # 같은 이름 충돌 회피 — 충돌 시 idx 추가
+        # 같은 이름 충돌 회피 — 충돌 시 idx 추가 (random seeded → 결정적)
         while p.exists():
-            p = target_dir / f"{rand_name(i)}_{secrets.token_hex(2)}{src_ext}"
+            p = target_dir / f"{rand_name(i)}_{random.randint(0, 0xFFFF):04x}{src_ext}"
         p.write_bytes(payload)
         paths.append(p)
     return paths
@@ -55,23 +58,23 @@ def apply_encryption_write(path: Path) -> None:
     with open(path, "r+b") as f:
         if pattern == "prefix":
             f.seek(0)
-            f.write(secrets.token_bytes(32))
+            f.write(random.randbytes(32))
         elif pattern == "prefix_suffix":
             f.seek(0)
-            f.write(secrets.token_bytes(32))
+            f.write(random.randbytes(32))
             if size > 64:
                 f.seek(-32, os.SEEK_END)
-                f.write(secrets.token_bytes(32))
+                f.write(random.randbytes(32))
         elif pattern == "multi_chunk":
             n_chunks = random.randint(3, 5)
             chunk_size = random.choice((16, 32, 64))
             for _ in range(n_chunks):
                 off = random.randint(0, max(0, size - chunk_size))
                 f.seek(off)
-                f.write(secrets.token_bytes(chunk_size))
+                f.write(random.randbytes(chunk_size))
         else:  # full
             f.seek(0)
-            f.write(secrets.token_bytes(size))
+            f.write(random.randbytes(size))
 
 
 def rename_with_jitter(src: Path, dst_ext_pool: tuple[str, ...]) -> Path:

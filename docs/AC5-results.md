@@ -67,27 +67,30 @@
 
 ### 2.4 학습 후 feature coefficient (honest reporting)
 
-`python-engine/model/train.py` stdout (v3 보강 후):
+`python-engine/model/train.py` stdout (v3.2 결정성 + gitclone variants 후):
 
 ```
 학습 샘플 (window-sliced @ 1000ms, min_events=4):
   positive(v1+v2): 60 windows from 60 files
-  negative       : 337 windows from 37 files
-  total          : 397 samples
+  negative       : 약 360+ windows from 40 files
+  (gitclone variants 3종 추가 후 baseline 10 + spread 30 = 40)
 
 classes_: [0 1]  (== [0=benign, 1=ransomware])
 
-feature coefficients:
-  write_rate         coef = -0.003128
-  rename_rate        coef = -0.003128
-  ext_diversity      coef = +0.006643
-  size_mean          coef = +0.000604
-  size_std           coef = -0.000410
-  pid_fanout         coef = -0.006090
-  intercept = -15.0810
+feature coefficients (v3.2 결정성 데이터):
+  write_rate         coef = -0.000455
+  rename_rate        coef = -0.000455
+  ext_diversity      coef = -0.001450
+  size_mean          coef = +0.002543
+  size_std           coef = -0.003365
+  pid_fanout         coef = -0.001029
+  intercept = -17.4783
 
 train accuracy: 1.0000
 ```
+
+이전 v3 coef (참조용):
+- write_rate -0.003128, ext_diversity +0.006643, size_mean +0.000604, intercept -15.08
 
 **v3 ↔ v2 비교**:
 | feature | v2 coef | v3 coef | 의미 변화 |
@@ -240,3 +243,4 @@ bash scripts/eval-ac5.sh
 | v2 | 2026-05-23 | simulate v1/v2/v3 randomization 보강 (count jitter, 파일명/extension 풀, write pattern 4종, op shuffle). 데이터셋 학습 20→60 + held-out 10→30. **재평가 PASS (30/30 TP, 0/10 FP)** + §4.4/4.5 갱신 — proba 분포 한계는 합성 분포 본질이라 명시 | C |
 | v3 | 2026-05-23 | **Option D**: gen-negative `--spreads 1,5,30 --reuse` + features.py `slice_to_windows` + train/eval per-window. negative window 10→337 (33×). **재평가 PASS (30/30 TP, 0/37 FP)** + §2.2 슬라이싱 설계 + §4.5 갱신 — 양극단 proba 원인이 `write_rate` 에서 `size_mean` 직교성으로 이동 식별. | C |
 | v3.1 | 2026-05-23 | **CCG audit fix (Codex Top 5)**: app.py 도 `slice_to_windows + max(window_proba)` 적용해 train/serve drift 제거. app.py malformed JSON → 400, events list 검증, `MAX_CONTENT_LENGTH` 강화 (보안). rust-service classifier_client 에 `error_for_status()` 추가 (non-200 verdict 미발행 보장, schema §2.2.1). gen-negative `--reuse` 모드에 `LABEL_EXCLUDE_SUBDIRS={gitclone_express:('node_modules',)}` 적용. test 32→34 (slice + boundary + 보안 케이스). | C |
+| v3.2 | 2026-05-23 | **CCG defer 항목 처리 (Codex #9/#10/enum drift)**: ① 결정성 — `_common.py` `secrets.token_bytes` → `random.randbytes` (seeded), `gen-positive` + `gen-negative` time-based ts → fixed epoch + sentinel pid → 동일 seed/code 면 dataset byte-identical (md5 검증 완료). ② `scripts/check-schema-drift.py` 신규 — Flask test_client 기반 16 항목 deep 검증 (literal + runtime + behavioral). shell 은 wrapper 로 위임. ③ contracts/interface-schema.md §2.2.1 `rule-based-v1 → rules-v1` rename 을 "v1.1 정상화 일부 (in-tree consumer 한정 안전, 향후 enum rename 금지)" 로 honest 재기술. 데이터셋 재생성 (positive 90 + negative spread 30 with gitclone-only 3종 추가) → model.pkl 재학습. **AC5 PASS 30/30 TP, 0/40 FP**. | C |

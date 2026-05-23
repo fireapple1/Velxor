@@ -121,7 +121,13 @@ A의 `classifier_client.rs` → C의 Waitress(threads=4) `:8765/classify`.
 | `rules-fallback-<ver>` | 학습 실패 / 예외 시 룰 자동 fallback |
 | `stub-<ver>` | 테스트·시연용 하드코드 (VELXOR_STUB=engine 또는 both) |
 
-v1.0의 `"rule-based-v1"` 은 v1.1 발행 직후 `"rules-v1"` 로 C 측 자체 rename (additive 정책과 무관한 자체 코드 변경).
+**Enum value rename (v1.0 → v1.1)**: v1.0 의 `"rule-based-v1"` 은 v1.1 에서 `"rules-v1"` 로 일관성 정규화. **이것은 엄밀히는 consumer-breaking 변경** — v1.0 클라이언트가 string equality 로 `"rule-based-v1"` 를 매칭하고 있었다면 v1.1 응답을 인식 못함. 그러나:
+
+1. v1.0 ↔ v1.1 발행 사이 외부 consumer 가 없었고 (in-tree 코드만 존재),
+2. v1.1 발행 시점에 `python-engine/app.py` + `python-engine/fallback_rules.py` 동시 갱신되어 `"rule-based-v1"` 은 어떤 코드에서도 emit 되지 않음,
+3. 마이그레이션 가이드 (in-tree consumer 측): prefix `"rules-"` 로 startswith 매칭 권장 — 향후 추가될 `"rules-fallback-v1"` 등 변종도 자동 흡수.
+
+따라서 v1.1 정상화의 일부로 진행했다 (Codex audit #2 명시). 이후 v1.x 발행에서는 enum value rename 을 금지 — 새 값은 새 prefix 로만 도입.
 
 #### 2.2.2 Empty events 처리 (**[v1.1]**, A #3 + C §1.3 dedup)
 

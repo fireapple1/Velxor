@@ -52,16 +52,18 @@ def prep_zip_archive(zip_path: Path, n: int):
 
 
 def scan_to_events(dst_dir: Path, t_start_ms: int, spread_ms: float,
-                   exclude_subdirs: tuple[str, ...] = ()) -> list[dict]:
+                   exclude_subdirs: tuple[str, ...] = (),
+                   pid: int = 20000) -> list[dict]:
     """결과 디렉토리 walk → 파일별 FileRename + FileWrite dual emit (positive 일관).
     ts 는 t_start + (i/n) × spread_ms 로 균등 분배 — mtime 폭주 회피.
 
     spread_ms: 합성 분포 폭. 실측 워크로드 elapsed 가 아닌 인위적 값 권장
     (write_rate 분포 다양화 — Option D, AC5-results v3 §4.5).
-    exclude_subdirs: walk 시 무시할 서브디렉토리 이름 (예: ('node_modules',))."""
-    pid = os.getpid()
-    parent_pid = os.getppid()
-    image_path = sys.executable
+    exclude_subdirs: walk 시 무시할 서브디렉토리 이름 (예: ('node_modules',)).
+    pid: 결정성 (Codex audit #9) — os.getpid() 는 invocation 마다 달라져
+         같은 seed 재생성이 byte-identical 안 됨. caller 가 명시 sentinel 주입."""
+    parent_pid = 1
+    image_path = "/synthetic/negative-workload"
     paths = []
     for root, dirs, files in os.walk(dst_dir):
         # in-place 수정으로 walk 가 무시
@@ -197,6 +199,12 @@ LABEL_EXCLUDE_SUBDIRS = {
     "gitclone_express": ("node_modules",),
 }
 
+# 결정성 (Codex audit #9): --reuse + --spreads 모드에서 time.time() 대신 fixed epoch.
+# legacy non-reuse 모드는 실 워크로드 시각 그대로 — file content 도 비결정적이므로
+# 결정성 보장 X (이 경로는 baseline 생성 1 회용).
+BASE_TS_MS = 1779_000_000_000  # 2026-05-23 ~ stable epoch
+LABEL_TS_STRIDE_MS = 100_000   # label 간 격리 (10 workloads × 100k = 1M range/seed)
+
 
 def parse_spreads(spec: str) -> list[float]:
     """'1,5,30' → [1.0, 5.0, 30.0]"""
@@ -258,15 +266,25 @@ def main():
 
         if spread_pool:
             # spread × runs grid — same dst 디렉토리, 다른 ts 분포
+            label_idx = next(
+                (i for i, (l, _) in enumerate(WORKLOADS) if l == label), 0
+            )
             for spread_s in spread_pool:
                 spread_ms = spread_s * 1000.0
                 for run_idx in range(1, args.runs + 1):
                     if args.seed is not None:
                         random.seed(args.seed + run_idx)
-                    t_start_ms = int(time.time() * 1000) + run_idx
+                    # 결정적 t_start_ms — label/spread/run 격리, time.time() 무관
+                    t_start_ms = (BASE_TS_MS
+                                  + label_idx * LABEL_TS_STRIDE_MS
+                                  + int(spread_s * 1000) * 10
+                                  + run_idx)
+                    # pid 결정성: label_idx + run_idx 기반 sentinel (20000+ 대역)
+                    sentinel_pid = 20000 + label_idx * 100 + run_idx
                     events = scan_to_events(
                         dst, t_start_ms, spread_ms,
                         exclude_subdirs=LABEL_EXCLUDE_SUBDIRS.get(label, ()),
+                        pid=sentinel_pid,
                     )
                     if not events:
                         skips.append((f"{label}_s{spread_s:g}_run_{run_idx:02d}",
