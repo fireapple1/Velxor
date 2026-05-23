@@ -103,10 +103,23 @@ export function DetailPanel({ node, verdict, onBlocked }: Props) {
 
         {verdictForNode && (
           <>
-            <div style={{ ...LABEL, marginTop: 12 }}>CONFIDENCE</div>
+            <div style={{ ...LABEL, marginTop: 12 }}>
+              CONFIDENCE <span style={{ opacity: 0.6, textTransform: "none", letterSpacing: 0 }}>
+                (verdict 신뢰도; 1.00 = strong, engine `1 - max_proba` 변환)
+              </span>
+            </div>
             <div style={{ ...VAL, color: verdictColor, fontSize: 42, fontWeight: 800, lineHeight:1, }}>
               {verdictForNode.confidence.toFixed(2)}
             </div>
+            {/* lr_max_proba 노출 — AC5 결과의 ransomware probability 와 의미 정합 */}
+            {(() => {
+              const lr = verdictForNode.evidence.find((e) => e.startsWith("lr_max_proba="));
+              return lr ? (
+                <div style={{ marginTop: 8, fontSize: 11, color: "#8B949E" }}>
+                  AC5 측 ransomware probability: <code style={{ color: "#79C0FF" }}>{lr.replace("lr_max_proba=", "")}</code>
+                </div>
+              ) : null;
+            })()}
 
             <div style={{ ...LABEL, marginTop: 12 }}>EVIDENCE</div>
             <ul style={{ margin: "4px 0 0 18px", padding: 0, color: "#C9D1D9" }}>

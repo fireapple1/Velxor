@@ -99,38 +99,69 @@ const nodeTypes: NodeTypes = {
   velxor: VelxorNodeView,
 };
 
-function layoutFull(nodes: VelxorNode[], edges: Edge[]): VelxorNode[] {
-  if (nodes.length === 0) return nodes;
+// Topology signature: layout 은 graph 구조 (node id 집합 + edge 집합) 변경 시에만 재계산.
+// data/state 변경 (verdict, killed, evidence 등) 만으로는 layout 재계산 안 함 — PID drift 방지.
+// (Codex 2차 audit UI #1 HIGH 해소)
+function topologyKey(nodes: VelxorNode[], edges: Edge[]): string {
+  const nodeIds = nodes.map((n) => n.id).sort().join("|");
+  const edgeIds = edges.map((e) => `${e.source}->${e.target}`).sort().join("|");
+  return `${nodeIds}::${edgeIds}`;
+}
+
+function computePositions(
+  nodeIds: string[],
+  edges: Edge[],
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  if (nodeIds.length === 0) return positions;
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: "TB",
-    nodesep: 75, 
+    nodesep: 75,
     ranksep: 100,
   });
-
-  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
-  edges.forEach((e) => g.setEdge(e.source, e.target));
+  const idSet = new Set(nodeIds);
+  nodeIds.forEach((id) => g.setNode(id, { width: NODE_W, height: NODE_H }));
+  // 양 끝 node 가 모두 존재할 때만 edge 등록 — 누락된 parentPid 가 implicit node 로
+  // 등재돼 rank 가 매 update 마다 늘어나는 것을 방지 (drift 보강 안전망).
+  edges.forEach((e) => {
+    if (idSet.has(e.source) && idSet.has(e.target)) {
+      g.setEdge(e.source, e.target);
+    }
+  });
 
   dagre.layout(g);
 
-  return nodes.map((n) => {
-    const pos = g.node(n.id);
-    return pos
-      ? {
-          ...n,
-          position: {
-            x: pos.x - NODE_W / 2,
-            y: pos.y - NODE_H / 2,
-          },
-        }
-      : n;
-  });
+  for (const id of nodeIds) {
+    const pos = g.node(id);
+    if (pos) {
+      positions.set(id, {
+        x: pos.x - NODE_W / 2,
+        y: pos.y - NODE_H / 2,
+      });
+    }
+  }
+  return positions;
 }
 
 export function ProcessTree({ nodes, edges, onSelect }: Props) {
-  const laidOut = useMemo(() => layoutFull(nodes, edges), [nodes, edges]);
+  const layoutSig = useMemo(() => topologyKey(nodes, edges), [nodes, edges]);
+  const positions = useMemo(
+    () => computePositions(nodes.map((n) => n.id), edges),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layoutSig],
+  );
+
+  const laidOut = useMemo(
+    () =>
+      nodes.map((n) => ({
+        ...n,
+        position: positions.get(n.id) ?? n.position,
+      })),
+    [nodes, positions],
+  );
 
   return (
     <ReactFlow

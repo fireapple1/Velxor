@@ -19,7 +19,6 @@ import type { ConnectionState } from "./ws/client";
 
 import type {
   AlertPayload,
-  BehaviorEventV1,
   Verdict,
   WsMessage,
 } from "./types";
@@ -27,7 +26,9 @@ import type {
 const TIMELINE_H = 72;
 const MAX_ALERTS = 5;
 
-const KILLED_OUTCOMES = new Set(["killed", "terminated", "already_dead"]);
+// Backend rust-service/src/blocker.rs Outcome wire 값 정합 (Codex 2차 audit UI #3 fix).
+// already_gone 은 "process 이미 종료" → 사실상 killed state 와 동일 의미.
+const KILLED_OUTCOMES = new Set(["killed", "terminated", "already_gone"]);
 const TIMELINE_CAP_MS = 60_000;
 const TIMELINE_CAP_N = 1000;
 

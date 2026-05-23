@@ -38,16 +38,20 @@ export function useVelxorWs(
         let m: WsMessage;
         try {
           m = JSON.parse(e.data) as WsMessage;
-        } catch {
+        } catch (err) {
+          console.warn("[velxor-ws] malformed JSON dropped", err);
+          return;
+        }
+        // gap 우선 처리 — Rust ws_broadcaster 는 lag/replay-miss 시 gap.seq=0 으로 보냄.
+        // seq dedupe 가 먼저 검사하면 gap 이 항상 drop → full refresh 트리거 X.
+        // (Codex 2차 audit UI #2 HIGH 해소)
+        if (m.type === "gap" && typeof m.payload?.to === "number") {
+          lastSeq = m.payload.to;
+          onMessageRef.current(m);
           return;
         }
         if (typeof m.seq !== "number" || m.seq <= lastSeq) return;
         lastSeq = m.seq;
-        // gap 발생 시 server 가 다음 emit 부터 새 seq 를 보낸다는 가정 대신
-        // payload.to 로 명시적 점프 — 5초 replay 윈도우 외 데이터 손실 후 sync 보장
-        if (m.type === "gap" && typeof m.payload?.to === "number") {
-          lastSeq = m.payload.to;
-        }
         onMessageRef.current(m);
       };
 

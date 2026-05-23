@@ -1,4 +1,5 @@
-// contracts/interface-schema.md v1.0 기준. 스키마 변경 시 동시 갱신.
+// contracts/interface-schema.md v1.1 기준. 스키마 변경 시 동시 갱신.
+// (Codex 2차 audit UI: 주석 v1.0 → v1.1 정합)
 
 export type EventType = "FileWrite" | "FileRename" | "ProcessCreate";
 
