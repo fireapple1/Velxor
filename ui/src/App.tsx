@@ -80,6 +80,12 @@ export default function App() {
   const [timelineEvents, setTimelineEvents] =
     useState<TimelineEvent[]>([]);
 
+  // ★ 추가된 부분: 상단 배너 상태 관리
+  const [criticalBanner, setCriticalBanner] = useState<{
+    pid: number;
+    message: string;
+  } | null>(null);
+
   const killedPidsRef = useRef<Set<number>>(new Set());
 
   const handleMessage = useCallback((m: WsMessage) => {
@@ -154,6 +160,12 @@ export default function App() {
       );
 
       if (v.verdict === "ransomware") {
+        // ★ 추가된 부분: 랜섬웨어 감지 시 배너 정보 세팅
+        setCriticalBanner({
+          pid: v.pid,
+          message: `PID ${v.pid} 프로세스에서 악성 암호화 행위가 감지되었습니다.`,
+        });
+
         setNodes((ns) =>
           ns.map((n) => {
             if (n.id !== String(v.pid)) return n;
@@ -189,10 +201,11 @@ export default function App() {
       setEdges([]);
 
       setVerdict(null);
-
       setSelectedPid(null);
-
       setTimelineEvents([]);
+      
+      // ★ 추가된 부분: 화면이 전체 리셋될 때 배너도 함께 닫아줌
+      setCriticalBanner(null); 
 
       killedPidsRef.current.clear();
 
@@ -284,12 +297,9 @@ export default function App() {
       style={{
         height: "100vh",
         width: "100vw",
-
         display: "flex",
         flexDirection: "column",
-
         background: "#0B0F14",
-
         color: "#E6EDF3",
       }}
     >
@@ -297,6 +307,51 @@ export default function App() {
         connection={connectionState}
         alerts={alerts}
       />
+
+      {/* ★ 추가된 부분: 랜섬웨어 감지 시 뚝 떨어지는 핏빛 ALERT 배너 */}
+      {criticalBanner && (
+        <div
+          style={{
+            background: "#4a0000",
+            borderBottom: "2px solid #ff3333",
+            color: "#fff",
+            padding: "12px 24px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            animation: "slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+            zIndex: 1000,
+            boxShadow: "0 4px 12px rgba(255, 51, 51, 0.3)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <span style={{ fontSize: "20px" }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight: "bold", fontSize: "14px", color: "#ff3333", letterSpacing: "1px" }}>
+                RANSOMWARE DETECTED
+              </div>
+              <div style={{ fontSize: "12px", opacity: 0.9, marginTop: "2px" }}>
+                {criticalBanner.message}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setCriticalBanner(null)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#fff",
+              fontSize: "18px",
+              cursor: "pointer",
+              opacity: 0.7,
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = "1")}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = "0.7")}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div
         style={{
@@ -333,10 +388,8 @@ export default function App() {
             <div
               style={{
                 width: 380,
-
                 borderLeft:
                   "1px solid #1E2936",
-
                 background: "#0F141B",
               }}
             >
@@ -384,21 +437,13 @@ function Header({
     <div
       style={{
         height: 52,
-
         flexShrink: 0,
-
         display: "flex",
-
         alignItems: "center",
-
         justifyContent: "space-between",
-
         padding: "0 20px",
-
         borderBottom: "1px solid #1E2936",
-
         background: "rgba(11,15,20,0.92)",
-
         backdropFilter: "blur(14px)",
       }}
     >
@@ -413,9 +458,7 @@ function Header({
           style={{
             width: 10,
             height: 10,
-
             borderRadius: 999,
-
             background: "#00C2FF",
           }}
         />
@@ -423,11 +466,8 @@ function Header({
         <div
           style={{
             color: "#E6EDF3",
-
             fontSize: 18,
-
             fontWeight: 700,
-
             letterSpacing: 1.2,
           }}
         >
@@ -449,13 +489,9 @@ function Header({
             display: "flex",
             alignItems: "center",
             gap: 8,
-
             padding: "6px 10px",
-
             borderRadius: 999,
-
             background: "#121821",
-
             border: "1px solid #1E2936",
           }}
         >
@@ -463,11 +499,8 @@ function Header({
             style={{
               width: 8,
               height: 8,
-
               borderRadius: 999,
-
               background: dotColor,
-
               display: "inline-block",
             }}
           />
@@ -475,11 +508,8 @@ function Header({
           <span
             style={{
               color: "#8B949E",
-
               fontSize: 11,
-
               fontWeight: 600,
-
               textTransform: "uppercase",
             }}
           >
@@ -505,9 +535,7 @@ function AlertStrip({
       style={{
         display: "flex",
         gap: 8,
-
         maxWidth: "min(60vw, 800px)",
-
         overflow: "hidden",
       }}
     >
@@ -517,23 +545,19 @@ function AlertStrip({
           title={a.message}
           style={{
             fontSize: 11,
-
             fontWeight: 600,
-
             color:
               a.severity === "error"
                 ? "#FF7B72"
                 : a.severity === "warn"
                 ? "#D29922"
                 : "#79C0FF",
-
             background:
               a.severity === "error"
                 ? "rgba(255,77,79,0.12)"
                 : a.severity === "warn"
                 ? "rgba(210,153,34,0.12)"
                 : "rgba(0,194,255,0.08)",
-
             border: `1px solid ${
               a.severity === "error"
                 ? "rgba(255,77,79,0.25)"
@@ -541,17 +565,11 @@ function AlertStrip({
                 ? "rgba(210,153,34,0.25)"
                 : "rgba(0,194,255,0.18)"
             }`,
-
             padding: "7px 12px",
-
             borderRadius: 999,
-
             whiteSpace: "nowrap",
-
             overflow: "hidden",
-
             textOverflow: "ellipsis",
-
             maxWidth: 220,
           }}
         >
