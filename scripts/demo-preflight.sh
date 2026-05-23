@@ -15,8 +15,8 @@ step()  { printf '\n\033[1m[%s]\033[0m\n' "$*"; }
 
 step "1) 작업 디렉터리"
 WORK="$HOME/velxor-work"
-mkdir -p "$WORK/demo/victim"
-[ -d "$WORK" ] && pass "$WORK 존재"
+mkdir -p "$WORK/dst" "$WORK/src"
+[ -d "$WORK" ] && pass "$WORK 존재 (dst/, src/)"
 
 step "2) 포트 점유 (7000 / 7001 / 8765 / 5173)"
 for port in 7000 7001 8765 5173; do
@@ -55,18 +55,25 @@ else
   (cd ui && npm install 2>&1 | tail -3)
 fi
 
-step "6) sudo NOPASSWD 또는 사전 인증"
+step "6) sudo (USE_SUDO=1 일 때만 필수)"
 if sudo -n true 2>/dev/null; then
-  pass "sudo 캐시 유효 (cargo run 즉시 가능)"
+  pass "sudo 캐시 유효 (USE_SUDO=1 모드 대비)"
 else
-  warn "sudo 캐시 만료 — 시연 직전 'sudo -v' 실행 권장"
+  warn "sudo 캐시 만료 — USE_SUDO=1 쓸 거면 'sudo -v' 실행"
 fi
 
-step "7) fanotify 사용 가능성"
-if [ -r /proc/self/status ] && grep -q '^CapBnd' /proc/self/status; then
-  pass "/proc capability 정보 접근 가능"
+step "7) Rust 바이너리 capabilities (setcap)"
+BIN="rust-service/target/release/rust-service"
+if command -v getcap >/dev/null 2>&1; then
+  CAPS=$(getcap "$BIN" 2>/dev/null || true)
+  if echo "$CAPS" | grep -q 'cap_sys_admin\|cap_dac'; then
+    pass "setcap 적용됨 — sudo 없이 fanotify 동작 ($CAPS)"
+  else
+    warn "setcap 미적용 — USE_SUDO=1 로 실행하거나 setcap 추가 필요"
+    echo "         sudo setcap 'cap_sys_admin,cap_dac_read_search+ep' $BIN"
+  fi
 else
-  warn "capability 정보 확인 불가 (영향 없음)"
+  warn "getcap 미설치 — 'sudo apt install -y libcap2-bin'"
 fi
 
 step "8) tmux"

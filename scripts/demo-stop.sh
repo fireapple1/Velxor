@@ -35,11 +35,11 @@ for port in 7000 7001 8765 5173; do
   fi
 done
 
-# trigger sandbox 정리
-VICTIM="$HOME/velxor-work/demo/victim"
-if [ -d "$VICTIM" ]; then
-  rm -f "$VICTIM"/doc_*.txt "$VICTIM"/doc_*.txt.locked 2>/dev/null || true
-  echo "[stop] ✓ victim sandbox 정리"
+# trigger sandbox 정리 — record-demo.sh 와 동일 경로
+DST="$HOME/velxor-work/dst"
+if [ -d "$DST" ]; then
+  rm -f "$DST"/ransom_*.enc 2>/dev/null || true
+  echo "[stop] ✓ dst sandbox 정리"
 fi
 
 echo "[stop] 완료."

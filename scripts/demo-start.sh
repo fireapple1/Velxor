@@ -10,11 +10,11 @@
 # 사용법:
 #   scripts/demo-start.sh             # STUB=engine (무대 기본)
 #   STUB_MODE=both scripts/demo-start.sh   # collector + engine 모두 stub
-#   STUB_MODE=none scripts/demo-start.sh   # full real (위험)
+#   STUB_MODE='' scripts/demo-start.sh     # full real (위험)
+#   USE_SUDO=1 scripts/demo-start.sh       # setcap 미적용 시 sudo 강제
 #
-# 사전조건:
-#   - scripts/demo-preflight.sh 통과
-#   - sudo -v 캐시 갱신됨
+# 기본은 run-all.sh / record-demo.sh 와 동일하게 sudo 없이 release 바이너리 사용
+# (setcap 가정). 안 되면 USE_SUDO=1.
 #
 # 종료:
 #   scripts/demo-stop.sh
@@ -25,8 +25,9 @@ cd "$ROOT"
 
 SESSION="velxor-demo"
 STUB_MODE="${STUB_MODE:-engine}"
+USE_SUDO="${USE_SUDO:-0}"
 LOG_DIR="$HOME/velxor-work/demo-logs"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$HOME/velxor-work/dst" "$HOME/velxor-work/src"
 
 if ! command -v tmux >/dev/null; then
   echo "ERROR: tmux 미설치 — sudo apt install -y tmux" >&2
@@ -48,36 +49,42 @@ for port in 7000 7001 8765 5173; do
   fi
 done
 
-# sudo 캐시 갱신 (Rust 가 fanotify 위해 root 필요)
-if ! sudo -n true 2>/dev/null; then
-  echo "[start] sudo 캐시 만료 — 비밀번호 입력 필요"
-  sudo -v || { echo "ERROR: sudo 인증 실패" >&2; exit 1; }
+# Rust 실행 prefix — USE_SUDO=1 일 때만 sudo
+if [[ "$USE_SUDO" == "1" ]]; then
+  if ! sudo -n true 2>/dev/null; then
+    echo "[start] USE_SUDO=1 — sudo 캐시 만료, 비번 입력 필요"
+    sudo -v || { echo "ERROR: sudo 인증 실패" >&2; exit 1; }
+  fi
+  RUST_PREFIX="sudo -E"
+else
+  RUST_PREFIX=""
 fi
 
-echo "[start] STUB_MODE=$STUB_MODE — tmux 세션 '$SESSION' 생성"
+echo "[start] STUB_MODE=$STUB_MODE  USE_SUDO=$USE_SUDO — tmux 세션 '$SESSION' 생성"
 
-# ① Rust (좌상)
+# ① Rust (좌상) — run-all.sh 와 동일하게 release 바이너리 직접 실행
 tmux new-session -d -s "$SESSION" -n main \
   "echo '── ① Rust collector + aggregator + WS :7000 + REST :7001 ──'; \
    sleep 2; \
-   sudo VELXOR_STUB='$STUB_MODE' VELXOR_LOG=info \
-     rust-service/target/release/rust-service \
-     2>&1 | tee '$LOG_DIR/rust.log'"
+   cd '$ROOT/rust-service' && \
+   VELXOR_STUB='$STUB_MODE' $RUST_PREFIX \
+     ./target/release/rust-service \
+     2> logs/trace.json | tee '$LOG_DIR/rust.log'"
 
 # ② Python (좌하) — Rust 아래로 split-window
 tmux split-window -t "$SESSION:0" -v \
   "echo '── ② Python engine (Flask + Waitress) :8765 ──'; \
    sleep 4; \
-   cd python-engine && source .venv/bin/activate && \
+   cd '$ROOT/python-engine' && source .venv/bin/activate && \
    VELXOR_STUB='$STUB_MODE' python waitress_conf.py \
      2>&1 | tee '$LOG_DIR/engine.log'"
 
-# ③ Electron UI (우상) — 메인 페인의 오른쪽으로 split-window
+# ③ UI (우상) — 메인 페인의 오른쪽으로 split-window
 tmux select-pane -t "$SESSION:0.0"
 tmux split-window -t "$SESSION:0.0" -h \
-  "echo '── ③ Electron UI (vite :5173) ──'; \
+  "echo '── ③ UI (vite :5173) — 브라우저에서 http://localhost:5173 ──'; \
    sleep 6; \
-   cd ui && npm run dev \
+   cd '$ROOT/ui' && npm run dev \
      2>&1 | tee '$LOG_DIR/ui.log'"
 
 # ④ Trigger shell (우하) — UI 페인 아래로 split-window
@@ -91,7 +98,7 @@ tmux split-window -t "$SESSION:0.2" -v \
    cd '$ROOT'; \
    exec bash"
 
-# 4-pane equal layout (2x2)
+# 4-pane equal layout (2x2) — ① 에 초기 포커스
 tmux select-layout -t "$SESSION:0" tiled
 tmux select-pane  -t "$SESSION:0.3"
 
