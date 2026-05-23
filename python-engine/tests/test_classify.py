@@ -1,5 +1,5 @@
-"""Edge case unit tests — worker-C-timeline §7 흡수.
-to-worker-c.md §4.2 "events 배열 edge case" 자가확인 evidence.
+"""Edge case unit tests — docs/history/worker-C-timeline.md §7 흡수.
+docs/history/to-worker-c.md §4.2 "events 배열 edge case" 자가확인 evidence.
 
 v1.1 schema (interface-schema.md §2.1-§2.4) 후속 반영:
   §2.1 body 상한 (events≤1024, body≤4MiB) → test_classify_oversized_events_returns_413
@@ -146,7 +146,7 @@ def test_classify_many_events_returns_200(client):
 def test_model_version_consistency_engine_and_both_both_emit_stub(
     stub_engine_client, stub_both_client,
 ):
-    """to-worker-c.md §4.1 — VELXOR_STUB in (engine, both) → stub-v1 일관."""
+    """docs/history/to-worker-c.md §4.1 — VELXOR_STUB in (engine, both) → stub-v1 일관."""
     he = stub_engine_client.get("/health").get_json()
     hb = stub_both_client.get("/health").get_json()
     assert he["model_version"] == "stub-v1"

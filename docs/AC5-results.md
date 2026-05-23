@@ -35,11 +35,10 @@
 - **artifact**: `python-engine/model/model.pkl`
 - **학습 입력 (2026-05-23 v3 보강 — Option D)**:
   - positive: `datasets/positive/v1_run_{01..30}.jsonl` + `v2_run_{01..30}.jsonl` (60 파일 → **60 windows**)
-  - negative: `datasets/negative/*.jsonl` (37 파일 → **337 windows**)
+  - negative: `datasets/negative/*.jsonl` (**40 파일 → 373 windows**, v3.2 기준)
     - baseline 10 (rsync × 4, unzip × 4, gitclone × 1, npm × 1)
-    - **신규 spread variants 27**: rsync × 4 × 3 spreads (1/5/30s) + unzip × 4 × 3 + npm × 3
-    - gitclone variants 미생성 — `git_express/` 디렉토리에 npm install 이후 `node_modules` 적재되어 baseline 과 분리 불가 (gitclone-only 결과 보존 안 됨). npm variants 만 진행.
-  - imbalance: 60 positive : 337 negative (~1:5.6) → `class_weight="balanced"` 자동 보정
+    - **spread variants 30**: rsync × 4 × 3 spreads (1/5/30s) + unzip × 4 × 3 + npm × 3 + **gitclone × 3** (v3.2 추가, exclude_subdirs=node_modules 로 npm 오염 분리)
+  - imbalance: 60 positive : 373 negative (~1:6.2) → `class_weight="balanced"` 자동 보정
 - **held-out (v3 미보강 — v2 와 동일)**: `datasets/heldout/v3/v3_run_{01..30}.jsonl` (학습 절대 미포함)
 
 ### 2.2 window-sliced features (Option D 핵심)
@@ -122,13 +121,14 @@ v3_run_15.jsonl  ransomware  1.000  372  [TP]
 v3_run_30.jsonl  ransomware  1.000  458  [TP]
 ```
 
-### 3.2 Negative (expect benign) — 37 files (v3 spread variants 포함)
+### 3.2 Negative (expect benign) — 40 files (v3.2 gitclone variants 포함)
 
 | 파일 분류 | count | verdict | max_proba | n_events | n_win | label |
 |---|---|---|---|---|---|---|
 | baseline _run_01 | 10 | benign | 0.000 | 400 ~ 13128 | 1 ~ 3 | TN × 10 |
 | rsync spread variants (1/5/30s) | 12 | benign | 0.000 | 600 ~ 4000 | 1 ~ 30 | TN × 12 |
 | unzip spread variants (1/5/30s) | 12 | benign | 0.000 | 400 ~ 4000 | 1 ~ 30 | TN × 12 |
+| gitclone spread variants (1/5/30s, v3.2) | 3 | benign | 0.000 | 484 | 1 ~ 30 | TN × 3 |
 | npm_install spread variants | 3 | benign | 0.000 | 13128 | 1 ~ 30 | TN × 3 |
 
 전체 37 file 모두 모든 window 의 proba=0.000 → max_proba=0.000.
@@ -139,8 +139,8 @@ v3_run_30.jsonl  ransomware  1.000  458  [TP]
 |---|---|---|---|
 | TP / positive | **30 / 30** | ≥ 9 / 10 (3× 초과) | PASS |
 | FN / positive | 0 / 30 | — | — |
-| FP / negative | **0 / 37** | ≤ 1 / 10 (≈ ≤ 3.7 / 37) | PASS |
-| TN / negative | 37 / 37 | — | — |
+| FP / negative | **0 / 40** | ≤ 1 / 10 (≈ ≤ 4 / 40) | PASS |
+| TN / negative | 40 / 40 | — | — |
 | **AC5 overall** | — | — | **PASS** |
 
 → **proba 분포는 v3 보강 (window slicing + spread variants) 후에도 1.000 / 0.000 양극단 유지**. 단, 양극단의 *원인* 이 v2 와 다름 — write_rate 직접 분리에서 size_mean / ext_diversity 직교성으로 이동 (§4.5).
@@ -173,14 +173,14 @@ v1/v2/v3 simulator 모두 [`open`, `truncate`, `write`, `rename`] 패턴만 emit
 
 ### 4.4 데이터셋 크기 (v3 보강 후 갱신)
 
-| 분류 | v1 (초기) | v2 (보강) | v3 (Option D) | 변화 |
-|---|---|---|---|---|
-| positive 학습 file | 20 | 60 | 60 | v2 = v3 |
-| positive 학습 **window** | 20 | 60 | 60 | v2 = v3 (ts spread 5ms 라 슬라이싱돼도 1 window/file) |
-| negative 학습 file | 10 | 10 | **37** | 3.7× |
-| negative 학습 **window** | 10 | 10 | **337** | 33.7× |
-| held-out v3 | 10 | 30 | 30 | v2 = v3 |
-| **총 학습 sample** | 30 | 70 | **397** | 13× over v1 |
+| 분류 | v1 (초기) | v2 (보강) | v3 (Option D) | v3.2 (현행) | 변화 |
+|---|---|---|---|---|---|
+| positive 학습 file | 20 | 60 | 60 | 60 | v2..v3.2 동일 |
+| positive 학습 **window** | 20 | 60 | 60 | 60 | (ts spread ≤ ~30ms 라 1 window/file) |
+| negative 학습 file | 10 | 10 | 37 | **40** | 4.0× over v2 |
+| negative 학습 **window** | 10 | 10 | 337 | **373** | 37.3× over v2 |
+| held-out v3 | 10 | 30 | 30 | 30 | — |
+| **총 학습 sample** | 30 | 70 | 397 | **433** | 14.4× over v1 |
 
 - **negative file 보강**: 외부 네트워크 워크로드 재실행 회피 정책에 따라 캐시된 `~/velxor-work/*` 디렉토리 재사용 (`--reuse` 플래그). spread 변형 1/5/30s × 워크로드 8종 (gitclone variants 제외 — §2 참고).
 - **negative window 33× 증가**: 1s window slicing 으로 30s-spread 1 file → 30 window 가 됨. 다수 저활동 window 가 학습 데이터에 포함.
@@ -217,6 +217,33 @@ LR coef: `size_mean = +0.000604`, `intercept = -15.08`.
 3. entropy 피처 추가 (positive=random=high, negative dummy=low, real-file=mid) — 단 schema v1.x 의 op_detail 확장 필요
 4. RandomForest 로 비선형 결정 경계 학습 (현재 LR 은 size_mean 한 축으로만 분리)
 
+### 4.6 size_mean shortcut 의 실제 FP 위험 (HIGH, Codex 2차 audit #1)
+
+v3.2 모델 (`size_mean +0.002543, intercept -17.48`) 의 분류 경계를 합성 200-write 시나리오로 계산하면:
+
+| per-event file_size | proba (ransomware) | verdict |
+|---|---|---|
+| 4 KB | 0.000779 | benign |
+| 8 KB | **0.962990** | **ransomware** ← FP 임계점 |
+| 16 KB+ | ≈ 1.0 | ransomware |
+
+즉 **8KB 이상 uniform-size write 가 200개 이상 burst 하는 합법 워크로드는 FP**:
+
+- `dd if=/dev/random of=backup.bin bs=64K count=200` (system administrator script)
+- `tar -xf large-archive.tar` (해제된 파일 평균 size ≥ 8KB)
+- video chunk encoder / photo backup tool
+- block-aligned database export
+- `cp -r large-dataset/ ./` (mid-sized binary files)
+
+운영 배포 시 위 워크로드를 백색 명단(allow-list) 또는 size 분포 외 추가 피처 (entropy / dst extension entropy / ext_from_src_diff) 없이 LR 단독 판정 금지.
+
+**경계 조건 산출 코드** (참고용, eval 자동화 X — Codex audit evidence):
+```python
+# size_mean 만 변화시켰을 때의 logit
+proba(size) = 1 / (1 + exp(-(0.002543 * size - 17.478)))
+# 8192B 부근에서 0.5 cross
+```
+
 ---
 
 ## 5. 재현 절차
@@ -244,3 +271,4 @@ bash scripts/eval-ac5.sh
 | v3 | 2026-05-23 | **Option D**: gen-negative `--spreads 1,5,30 --reuse` + features.py `slice_to_windows` + train/eval per-window. negative window 10→337 (33×). **재평가 PASS (30/30 TP, 0/37 FP)** + §2.2 슬라이싱 설계 + §4.5 갱신 — 양극단 proba 원인이 `write_rate` 에서 `size_mean` 직교성으로 이동 식별. | C |
 | v3.1 | 2026-05-23 | **CCG audit fix (Codex Top 5)**: app.py 도 `slice_to_windows + max(window_proba)` 적용해 train/serve drift 제거. app.py malformed JSON → 400, events list 검증, `MAX_CONTENT_LENGTH` 강화 (보안). rust-service classifier_client 에 `error_for_status()` 추가 (non-200 verdict 미발행 보장, schema §2.2.1). gen-negative `--reuse` 모드에 `LABEL_EXCLUDE_SUBDIRS={gitclone_express:('node_modules',)}` 적용. test 32→34 (slice + boundary + 보안 케이스). | C |
 | v3.2 | 2026-05-23 | **CCG defer 항목 처리 (Codex #9/#10/enum drift)**: ① 결정성 — `_common.py` `secrets.token_bytes` → `random.randbytes` (seeded), `gen-positive` + `gen-negative` time-based ts → fixed epoch + sentinel pid → 동일 seed/code 면 dataset byte-identical (md5 검증 완료). ② `scripts/check-schema-drift.py` 신규 — Flask test_client 기반 16 항목 deep 검증 (literal + runtime + behavioral). shell 은 wrapper 로 위임. ③ contracts/interface-schema.md §2.2.1 `rule-based-v1 → rules-v1` rename 을 "v1.1 정상화 일부 (in-tree consumer 한정 안전, 향후 enum rename 금지)" 로 honest 재기술. 데이터셋 재생성 (positive 90 + negative spread 30 with gitclone-only 3종 추가) → model.pkl 재학습. **AC5 PASS 30/30 TP, 0/40 FP**. | C |
+| v3.3 | 2026-05-23 | **CCG 2차 audit 후속 (Codex 2nd audit)**: ① 문서 정리 — multi-worker 모드 종료 (혼자서 전부) 후 stale 문서 17 종 `docs/history/` 로 archive (`worker-*`, `contracts/from-worker-*`, `contracts/to-worker-*`, `contracts/handoff-week4-5.md`, `contracts/v1.1-review-trigger.md`, `contracts/c-review-notes.md`, `docs/handoff-ac3-recording.md`, cruft `B to A (1)` + `Poster` rename), `contracts/` 는 `interface-schema.md` 단독 유지. ② stale 숫자 갱신 — `0/37 FP, 37 files, 337 windows` → 실측 `0/40, 40 files, 373 windows`. README + AC5 §2/§3/§4.4 일관화. ③ §4.6 신규 — size_mean shortcut 의 실제 FP 임계점 명시 (8KB uniform write 200개 → ransomware 0.96). README §한계 에도 강조. ④ test_features 에 ts 누락/negative window_ms/event_type 누락 edge case 3종 추가 (37 PASS). Rust mockito integration test 는 dep 추가 필요 — Week 11 defer. | C |

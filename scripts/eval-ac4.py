@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """AC4 측정 — A 의 tracing JSON 파싱 → classify p99 < 100ms.
 
-worker-C-timeline §7.3 spec + from-worker-a-to-c-2026-05-23.md §2.1 / §6.
+docs/history/worker-C-timeline.md §7.3 spec + docs/history/from-worker-a-to-c-2026-05-23.md §2.1 / §6.
 
 A 가 emit 하는 tracing event (rust-service/logs/trace.json, tracing_subscriber
 JSON layer):
@@ -15,7 +15,7 @@ AC4 게이트 (consensus-plan §AC4):
   classify p99  < 100 ms   (sub-budget, C 측정)
   event → ws p99 < 1000 ms (시연 wall-clock, best effort, seq 매칭 시만)
 
-honest reporting (worker-C-timeline §7.3):
+honest reporting (docs/history/worker-C-timeline.md §7.3):
   - silent drop 가능성 → 도달 이벤트만 p99 계산 + n=<sample_count> 함께 emit
   - nearest-rank ceil-1 p99 (선형 보간 X)
   - classify_failed (timeout / 예외) 비율 별도 보고 — 게이트엔 영향 X 이지만

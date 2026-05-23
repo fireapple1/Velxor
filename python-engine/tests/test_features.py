@@ -166,6 +166,35 @@ def test_slice_4events_at_min_threshold():
     assert len(eligible) == 1 and len(eligible[0]) == 4
 
 
+def test_slice_missing_ts_unix_ms_defaults_to_zero():
+    """ts_unix_ms 누락 event → 0 으로 처리, sort 시 맨 앞."""
+    events = [
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 100},
+        {"event_type": "FileWrite", "pid": 1},  # ts 누락
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 50},
+    ]
+    out = slice_to_windows(events, 1000)
+    assert len(out) == 1 and len(out[0]) == 3
+
+
+def test_slice_negative_window_ms_treated_as_single_window():
+    """negative window_ms 도 ≤ 0 분기로 single window."""
+    events = [{"event_type": "FileWrite", "pid": 1, "ts_unix_ms": i * 5000}
+              for i in range(3)]
+    out = slice_to_windows(events, -1000)
+    assert len(out) == 1 and len(out[0]) == 3
+
+
+def test_slice_malformed_event_dict_no_event_type():
+    """event_type 누락 event 도 slice 는 통과 (extract 단계에서 무시)."""
+    events = [
+        {"pid": 1, "ts_unix_ms": 0},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 100},
+    ]
+    out = slice_to_windows(events, 1000)
+    assert len(out) == 1 and len(out[0]) == 2
+
+
 # 통합 — 실 데이터셋
 @pytest.mark.parametrize("rel_path,expected_class", [
     ("datasets/positive/v1_run_01.jsonl",        "positive"),
