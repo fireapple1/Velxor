@@ -1,256 +1,514 @@
 /* ============================================================
-   Velxor Presentation — custom.css
-   reveal.js 5.1.0 / theme: black
+   Velxor Presentation — White Theme
+   reveal.js 5.1.0 / theme: white
    ============================================================ */
 
-/* ── Korean font via CDN (Pretendard) ── */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
 
 :root {
-  --velxor-red:    #ff5252;
-  --velxor-amber:  #f0c040;
-  --velxor-dim:    #aaaaaa;
-  --velxor-border: #444444;
-  --velxor-bg-alt: #161616;
-  --velxor-green:  #69ff47;
-  --velxor-blue:   #40c8ff;
-  --slide-pad: 0 2.4rem;
+  --ink:        #0f172a;
+  --ink-soft:   #334155;
+  --ink-mute:   #64748b;
+  --line:       #e2e8f0;
+  --line-soft:  #f1f5f9;
+  --bg:         #ffffff;
+  --bg-alt:     #f8fafc;
+  --accent:     #2563eb;
+  --accent-soft:#dbeafe;
+  --good:       #16a34a;
+  --good-soft:  #dcfce7;
+  --warn:       #d97706;
+  --warn-soft:  #fef3c7;
+  --bad:        #dc2626;
+  --bad-soft:   #fee2e2;
+  --mono: 'JetBrains Mono', 'D2Coding', 'Fira Code', ui-monospace, monospace;
 }
 
-/* ── Base font override ── */
+/* ── Base ── */
 .reveal,
-.reveal h1, .reveal h2, .reveal h3,
-.reveal p, .reveal li, .reveal td, .reveal th {
+.reveal h1, .reveal h2, .reveal h3, .reveal h4,
+.reveal p, .reveal li, .reveal td, .reveal th, .reveal small {
   font-family: 'Pretendard Variable', Pretendard, -apple-system,
                'Apple SD Gothic Neo', sans-serif !important;
+  color: var(--ink);
+}
+.reveal { background: var(--bg); }
+.reveal .slides section { padding: 0 3rem; text-align: left; }
+.reveal .slides section.center { text-align: center; }
+
+.reveal h1 {
+  font-size: 3.4em;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  margin: 0;
+  line-height: 1.05;
+}
+.reveal h2 {
+  font-size: 1.8em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.8em;
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+.reveal h2::before {
+  content: attr(data-num);
+  font-family: var(--mono);
+  font-size: 0.55em;
+  font-weight: 600;
+  color: var(--ink-mute);
+  letter-spacing: 0.05em;
+}
+.reveal h3 {
+  font-size: 1.0em;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin: 0 0 0.4em;
+  letter-spacing: -0.01em;
 }
 
-.reveal h1 { font-size: 1.9em; letter-spacing: -0.02em; }
-.reveal h2 { font-size: 1.5em; letter-spacing: -0.01em; border-bottom: 2px solid var(--velxor-border); padding-bottom: 0.2em; margin-bottom: 0.6em; }
-.reveal h3 { font-size: 1.1em; color: var(--velxor-dim); font-weight: 600; }
+.reveal p, .reveal li { color: var(--ink-soft); }
+.reveal a { color: var(--accent); text-decoration: none; }
 
-/* ── Section padding ── */
-.reveal .slides section { padding: var(--slide-pad); }
+/* ── Title slide ── */
+.title-slide { text-align: left !important; padding: 0 4rem !important; }
+.title-slide .brand {
+  font-family: var(--mono);
+  font-size: 0.5em;
+  font-weight: 600;
+  color: var(--ink-mute);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  margin-bottom: 1em;
+}
+.title-slide .tagline {
+  font-size: 1.2em;
+  color: var(--ink-soft);
+  font-weight: 500;
+  margin-top: 0.6em;
+  line-height: 1.4;
+}
+.title-slide .meta {
+  margin-top: 3em;
+  display: flex;
+  gap: 2.4em;
+  font-size: 0.55em;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+}
+.title-slide .meta b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 0.2em; }
 
-/* ── Big numbers (AC4, AC5) ── */
-.big-num {
-  font-size: 4.2em;
-  font-weight: 800;
-  color: var(--velxor-red);
-  line-height: 1;
+/* ── Keyword tag ── */
+.tag {
   display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--bg-alt);
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  letter-spacing: 0.02em;
+}
+.tag.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.tag.good   { background: var(--good-soft);   color: var(--good);   border-color: transparent; }
+.tag.warn   { background: var(--warn-soft);   color: var(--warn);   border-color: transparent; }
+.tag.bad    { background: var(--bad-soft);    color: var(--bad);    border-color: transparent; }
+
+/* ── Big number block ── */
+.bignum {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0;
+}
+.bignum .num {
+  font-family: var(--mono);
+  font-size: 5em;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink);
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
-.big-num.green  { color: var(--velxor-green); }
-.big-num.amber  { color: var(--velxor-amber); }
-.big-num.blue   { color: var(--velxor-blue);  }
+.bignum .num small {
+  font-size: 0.35em;
+  color: var(--ink-mute);
+  font-weight: 600;
+  margin-left: 0.1em;
+}
+.bignum .num.accent { color: var(--accent); }
+.bignum .num.good   { color: var(--good); }
+.bignum .num.bad    { color: var(--bad); }
+.bignum .label {
+  font-size: 0.7em;
+  color: var(--ink-mute);
+  margin-top: 0.4em;
+  font-weight: 500;
+}
+.bignum .sub {
+  font-family: var(--mono);
+  font-size: 0.55em;
+  color: var(--ink-mute);
+  margin-top: 0.2em;
+}
 
-/* ── Demo grid (slide 8) ── */
-.demo-grid {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: 24px;
+/* ── Grid layouts ── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5em; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5em; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5em; }
+
+/* ── Keyword card ── */
+.kcard {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.2em 1.4em;
+}
+.kcard .k {
+  font-size: 1.0em;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 0.3em;
+  display: flex;
   align-items: center;
-  margin-top: 0.8rem;
+  gap: 0.4em;
+}
+.kcard .k .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+.kcard .d {
+  font-size: 0.7em;
+  color: var(--ink-mute);
+  line-height: 1.5;
+  margin: 0;
+}
+.kcard.accent { background: var(--accent-soft); border-color: transparent; }
+.kcard.good   { background: var(--good-soft);   border-color: transparent; }
+.kcard.good .dot { background: var(--good); }
+.kcard.warn   { background: var(--warn-soft);   border-color: transparent; }
+.kcard.warn .dot { background: var(--warn); }
+.kcard.bad    { background: var(--bad-soft);    border-color: transparent; }
+.kcard.bad .dot  { background: var(--bad); }
+
+/* ── Flow / pipeline ── */
+.flow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 0.6em 0;
+}
+.flow .step {
+  flex: 1;
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1em 1.1em;
+}
+.flow .step .n {
+  font-family: var(--mono);
+  font-size: 0.6em;
+  color: var(--ink-mute);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+.flow .step .t {
+  font-size: 0.95em;
+  font-weight: 800;
+  color: var(--ink);
+  margin: 0.25em 0;
+}
+.flow .step .s {
+  font-size: 0.62em;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+}
+.flow .arrow {
+  align-self: center;
+  font-size: 1.4em;
+  color: var(--ink-mute);
+  padding: 0 0.5em;
 }
 
-/* ── Placeholder slot ── */
-.slot {
-  border: 2px dashed #888;
-  padding: 8px;
-  min-height: 360px;
-  display: grid;
-  place-items: center;
-  color: #aaa;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.03);
-}
-
-/* ── Disclaimer box (slide 11) ── */
-.disclaimer {
-  background: #2a1f00;
-  border-left: 6px solid var(--velxor-amber);
-  padding: 16px 22px;
-  border-radius: 4px;
-  text-align: left;
-  margin: 0.4em 0;
-}
-.disclaimer li { font-size: 0.82em; line-height: 1.7; color: #e8d8a0; }
-.disclaimer strong { color: var(--velxor-amber); }
-
-/* ── Gate matrix / data table ── */
-.gate-table {
+/* ── Table ── */
+.tbl {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78em;
-  margin-top: 0.6em;
+  margin-top: 0.4em;
 }
-.gate-table th {
-  background: #222;
-  color: var(--velxor-amber);
-  padding: 6px 12px;
+.tbl th {
   text-align: left;
-  border-bottom: 2px solid var(--velxor-border);
-}
-.gate-table td {
-  padding: 5px 12px;
-  border-bottom: 1px solid #2a2a2a;
-  vertical-align: middle;
-}
-.gate-table tr:hover td { background: rgba(255,255,255,0.04); }
-.pass  { color: var(--velxor-green); font-weight: 700; }
-.fail  { color: var(--velxor-red);   font-weight: 700; }
-
-/* ── Architecture diagram ── */
-.arch-diagram {
-  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
   font-size: 0.72em;
-  background: #0d0d0d;
-  border: 1px solid var(--velxor-border);
-  border-radius: 8px;
-  padding: 1.2em 1.6em;
-  text-align: left;
-  line-height: 1.8;
-  white-space: pre;
+  color: var(--ink-mute);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.6em 0.8em;
+  border-bottom: 1px solid var(--line);
 }
-.arch-layer { color: #ddd; }
-.arch-arrow { color: var(--velxor-amber); }
-.arch-port  { color: var(--velxor-blue);  font-size: 0.9em; }
-.arch-note  { color: var(--velxor-dim);   font-size: 0.88em; }
+.tbl td {
+  padding: 0.7em 0.8em;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink);
+}
+.tbl td.mono { font-family: var(--mono); }
+.tbl td.num  { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+.tbl tr:last-child td { border-bottom: none; }
 
-/* ── Feature chips ── */
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 0.8em;
-}
-.feature-chip {
-  background: #1a1a1a;
-  border: 1px solid var(--velxor-border);
-  border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 0.75em;
-  text-align: left;
-}
-.feature-chip .fc-name { color: var(--velxor-blue); font-weight: 700; display: block; margin-bottom: 2px; }
-.feature-chip .fc-desc { color: var(--velxor-dim); }
-
-/* ── Metric row ── */
-.metric-row {
-  display: flex;
-  gap: 2rem;
-  justify-content: center;
-  align-items: flex-end;
-  margin: 0.6em 0;
-}
-.metric-block { text-align: center; }
-.metric-block .mb-label { font-size: 0.7em; color: var(--velxor-dim); display: block; margin-top: 4px; }
-.metric-block .mb-gate  { font-size: 0.65em; color: #666; display: block; }
-
-/* ── Outcome chips (AC6) ── */
-.outcome-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 0.6em;
-}
-.outcome-chip {
-  background: #111;
-  border: 1px solid #333;
-  border-radius: 5px;
-  padding: 7px 10px;
-  font-family: 'JetBrains Mono', monospace;
+/* ── Code block ── */
+.reveal pre {
+  box-shadow: none;
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 10px;
   font-size: 0.62em;
-  color: var(--velxor-blue);
+  width: 100%;
+}
+.reveal pre code {
+  font-family: var(--mono) !important;
+  padding: 1.2em 1.4em;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  line-height: 1.55;
 }
 
-/* ── Title slide accent ── */
-.title-badge {
-  display: inline-block;
-  background: var(--velxor-red);
-  color: #fff;
-  font-size: 0.55em;
-  font-weight: 700;
-  padding: 3px 10px;
-  border-radius: 3px;
-  letter-spacing: 0.05em;
-  vertical-align: middle;
-  margin-left: 0.4em;
-}
-
-/* ── AC gate ALL PASS badge ── */
-.all-pass-badge {
-  display: inline-block;
-  background: var(--velxor-green);
-  color: #000;
-  font-weight: 800;
-  font-size: 0.8em;
-  padding: 4px 16px;
+/* ── Inline mono ── */
+.reveal code:not(pre code) {
+  font-family: var(--mono);
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 1px 6px;
   border-radius: 4px;
-  letter-spacing: 0.04em;
+  font-size: 0.85em;
 }
 
-/* ── Timeline dot (closed loop annotation) ── */
-.closed-loop {
-  font-size: 0.78em;
-  color: var(--velxor-amber);
-  border: 1px solid var(--velxor-amber);
-  border-radius: 4px;
-  display: inline-block;
-  padding: 4px 14px;
-  margin-top: 0.6em;
+/* ── Demo slide ── */
+.demo-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 1.5em;
+  align-items: center;
 }
-
-/* ── Video / img in demo slot ── */
 .demo-grid video,
 .demo-grid img {
-  max-width: 100%;
-  max-height: 340px;
-  border-radius: 6px;
-  border: 1px solid var(--velxor-border);
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-alt);
 }
-
-/* ── Caption text ── */
-.caption {
+.demo-grid .caption {
   font-size: 0.6em;
-  color: var(--velxor-dim);
-  margin-top: 6px;
-  display: block;
+  color: var(--ink-mute);
+  margin-top: 0.4em;
+  font-family: var(--mono);
 }
 
-/* ── Smaller list text ── */
-.reveal .slides ul.dense li,
-.reveal .slides ol.dense li {
-  font-size: 0.82em;
-  line-height: 1.65;
-  margin-bottom: 0.25em;
+/* ── KPI row ── */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1em;
+  margin: 0.6em 0;
+}
+.kpi {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1em 1.2em;
+  background: var(--bg);
+}
+.kpi .k-label {
+  font-size: 0.62em;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.kpi .k-val {
+  font-family: var(--mono);
+  font-size: 2.2em;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.1;
+  margin-top: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi .k-val small { font-size: 0.4em; color: var(--ink-mute); font-weight: 600; }
+.kpi .k-sub {
+  font-size: 0.6em;
+  color: var(--ink-mute);
+  margin-top: 0.3em;
+  font-family: var(--mono);
+}
+.kpi.good .k-val { color: var(--good); }
+.kpi.bad  .k-val { color: var(--bad);  }
+.kpi.accent .k-val { color: var(--accent); }
+
+/* ── Outcome chip grid (AC6) ── */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6em;
+}
+.chip {
+  font-family: var(--mono);
+  font-size: 0.65em;
+  background: var(--bg-alt);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6em 0.8em;
+  color: var(--ink);
+  text-align: center;
 }
 
-/* ── Keyword highlight in prose ── */
-.kw { color: var(--velxor-amber); font-weight: 700; }
-.kw-red { color: var(--velxor-red); font-weight: 700; }
-.kw-blue { color: var(--velxor-blue); font-weight: 700; }
-.kw-green { color: var(--velxor-green); font-weight: 700; }
-
-/* ── Separator rule ── */
-.reveal hr {
-  border: none;
-  border-top: 1px solid var(--velxor-border);
-  margin: 0.8em 0;
+/* ── Architecture diagram (replaces ASCII) ── */
+.arch {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5em;
+  font-family: inherit;
+  margin: 0.4em 0;
+}
+.arch .layer {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.9em 1.2em;
+  background: var(--bg);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1em;
+  align-items: center;
+}
+.arch .layer .n {
+  font-family: var(--mono);
+  font-size: 1.4em;
+  font-weight: 800;
+  color: var(--ink-mute);
+  width: 1.4em;
+  text-align: center;
+}
+.arch .layer .body .t {
+  font-size: 0.95em;
+  font-weight: 800;
+  color: var(--ink);
+}
+.arch .layer .body .s {
+  font-size: 0.65em;
+  color: var(--ink-mute);
+  font-family: var(--mono);
+  margin-top: 0.1em;
+}
+.arch .layer .port {
+  font-family: var(--mono);
+  font-size: 0.7em;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.arch .between {
+  font-family: var(--mono);
+  font-size: 0.62em;
+  color: var(--ink-mute);
+  text-align: center;
+  padding: 0 0.5em;
 }
 
-/* ── Speaker note styling (in notes window) ── */
-.reveal .speaker-notes aside.notes { font-size: 0.9em; }
+/* ── Pass/Fail mark ── */
+.pass { color: var(--good); font-weight: 800; font-family: var(--mono); }
+.fail { color: var(--bad);  font-weight: 800; font-family: var(--mono); }
 
-/* ── Fragment fade-in override for dark theme readability ── */
-.reveal .fragment.highlight-red.visible  { color: var(--velxor-red); }
-.reveal .fragment.highlight-green.visible{ color: var(--velxor-green); }
+/* ── Disclaimer ── */
+.note-card {
+  background: var(--warn-soft);
+  border-left: 4px solid var(--warn);
+  border-radius: 8px;
+  padding: 1em 1.3em;
+  margin: 0.3em 0;
+}
+.note-card .nt {
+  font-size: 0.75em;
+  font-weight: 800;
+  color: var(--warn);
+  margin-bottom: 0.2em;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.note-card .nb {
+  font-size: 0.78em;
+  color: var(--ink);
+  line-height: 1.5;
+}
 
-/* ── Responsive tweaks ── */
-@media (max-width: 900px) {
-  .demo-grid        { grid-template-columns: 1fr; }
-  .feature-grid     { grid-template-columns: repeat(2, 1fr); }
-  .outcome-grid     { grid-template-columns: repeat(2, 1fr); }
-  .big-num          { font-size: 3em; }
+/* ── Footer brand mark ── */
+.reveal .slide-number {
+  font-family: var(--mono);
+  color: var(--ink-mute);
+  background: transparent;
+  font-size: 0.7em;
+}
+.reveal .progress {
+  color: var(--accent);
+  height: 3px;
+}
+.reveal .controls { color: var(--ink-mute); }
+
+/* ── Misc ── */
+.reveal ul { list-style: none; padding-left: 0; }
+.reveal ul li {
+  position: relative;
+  padding-left: 1.1em;
+  margin-bottom: 0.4em;
+  font-size: 0.85em;
+  line-height: 1.55;
+}
+.reveal ul li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.6em;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.lead {
+  font-size: 1.1em !important;
+  color: var(--ink) !important;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.muted { color: var(--ink-mute) !important; }
+.mono  { font-family: var(--mono) !important; }
+
+hr { border: none; border-top: 1px solid var(--line); margin: 1em 0; }
+
+/* ── Closing slide ── */
+.closing {
+  text-align: center !important;
+}
+.closing .big {
+  font-size: 3.4em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+.closing .sub {
+  font-size: 1em;
+  color: var(--ink-mute);
+  margin-top: 0.8em;
+  font-family: var(--mono);
+}
+
+/* ── Print ── */
+@media print {
+  .reveal { background: #fff; }
 }
