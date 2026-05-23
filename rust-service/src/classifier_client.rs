@@ -114,11 +114,15 @@ pub async fn classify(
 ) -> anyhow::Result<serde_json::Value> {
     let events_ref: Vec<&serde_json::Value> = events.iter().map(|a| a.as_ref()).collect();
     let body = serde_json::json!({ "events": events_ref, "window_ms": window_ms });
+    // schema §2.2.1: non-200 → verdict 미발행 보장. error_for_status() 가 4xx/5xx 를
+    // Err 로 승격시켜 caller (aggregator) 가 verdict broadcast 를 skip 함.
+    // 이전 구현은 {"error":"events_overflow"} 같은 payload 를 verdict 처럼 흘릴 위험.
     let resp = http_client()
         .post(classify_url())
         .json(&body)
         .send()
         .await?
+        .error_for_status()?
         .json::<serde_json::Value>()
         .await?;
     Ok(resp)

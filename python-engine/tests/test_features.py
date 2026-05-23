@@ -145,6 +145,27 @@ def test_slice_window_ms_zero_returns_single_window():
     assert len(out) == 1 and len(out[0]) == 3
 
 
+# MIN_EVENTS_PER_WINDOW=4 경계 (Codex audit Top 5 #4) — train.py / eval-ac5.py / app.py 정합
+
+def test_slice_3events_below_min_threshold():
+    """3 events / 1 window → MIN_EVENTS=4 미만 → eligible 에 안 잡힘 (caller 측 필터)."""
+    events = [{"event_type": "FileWrite", "pid": 1, "ts_unix_ms": i}
+              for i in range(3)]
+    windows = slice_to_windows(events, 1000)
+    assert len(windows) == 1
+    eligible = [w for w in windows if len(w) >= 4]
+    assert eligible == []
+
+
+def test_slice_4events_at_min_threshold():
+    """4 events / 1 window → MIN_EVENTS=4 경계 통과."""
+    events = [{"event_type": "FileWrite", "pid": 1, "ts_unix_ms": i}
+              for i in range(4)]
+    windows = slice_to_windows(events, 1000)
+    eligible = [w for w in windows if len(w) >= 4]
+    assert len(eligible) == 1 and len(eligible[0]) == 4
+
+
 # 통합 — 실 데이터셋
 @pytest.mark.parametrize("rel_path,expected_class", [
     ("datasets/positive/v1_run_01.jsonl",        "positive"),

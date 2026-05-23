@@ -153,10 +153,87 @@ def test_model_version_consistency_engine_and_both_both_emit_stub(
     assert hb["model_version"] == "stub-v1"
 
 
-def test_malformed_json_does_not_crash(client):
+def test_malformed_json_returns_400(client):
+    """v1.1 §2.1 보안: malformed JSON 은 400 bad_request — 이전엔 200 benign 으로 통과."""
     r = client.post(
         "/classify",
         data="not-json-at-all",
         content_type="application/json",
     )
+    assert r.status_code == 400
+    body = r.get_json()
+    assert body["error"] == "bad_request"
+
+
+def test_classify_events_not_list_returns_400(client):
+    r = client.post("/classify", json={"events": "string-not-list", "window_ms": 1000})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "bad_request"
+
+
+def test_classify_events_items_not_dict_returns_400(client):
+    r = client.post("/classify", json={"events": [1, 2, 3], "window_ms": 1000})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "bad_request"
+
+
+# AC5 v3 / Option D — serve-time slicing 정합 (app.py ↔ train.py ↔ eval-ac5.py)
+
+def test_classify_multi_window_batch_slices_correctly(client):
+    """batch 가 multi-second 라도 train/eval 와 동일하게 1s window 별 분류 후 max."""
+    events = []
+    seq = 0
+    for sec in range(3):
+        for i in range(20):
+            seq += 1
+            events.append({
+                "schema_version": "1.0",
+                "seq": seq,
+                "dropped_since_last": 0,
+                "pid": 1234,
+                "parent_pid": 1,
+                "image_path": "/usr/bin/python3",
+                "event_type": "FileWrite",
+                "file_path": f"/tmp/doc_{seq:03d}.docx",
+                "op_detail": {"file_size": 100000},
+                "ts_unix_ms": sec * 1000 + i * 10,
+            })
+    r = client.post("/classify", json={"events": events, "window_ms": 1000})
     assert r.status_code == 200
+    body = r.get_json()
+    assert body["verdict"] in ("benign", "ransomware")
+    if body["model_version"].startswith("lr-"):
+        # lr 모드는 evidence 에 n_windows 노출 (≥ 1)
+        assert any("n_windows=" in e for e in body["evidence"])
+
+
+def test_classify_low_activity_returns_benign_no_signal(client):
+    """모든 window 가 min_events=4 미만 → eval-ac5.py 와 동일하게 benign 0.0 (no-signal).
+
+    serve/eval 정합 (Codex audit Top 5 #4). 이전 구현은 rules fallback 으로
+    flip 됐는데 그 경우 single event 가 rules-v1 의 high write_rate 분기로
+    잘못 ransomware 가 될 가능성 있음.
+    """
+    events = [
+        {
+            "schema_version": "1.0",
+            "seq": 1,
+            "dropped_since_last": 0,
+            "pid": 1234,
+            "parent_pid": 1,
+            "image_path": "/usr/bin/python3",
+            "event_type": "FileWrite",
+            "file_path": "/tmp/a.docx",
+            "op_detail": {"file_size": 100},
+            "ts_unix_ms": 1716300000000,
+        }
+    ]
+    r = client.post("/classify", json={"events": events, "window_ms": 1000})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["verdict"] == "benign"
+    assert body["confidence"] == 0.0
+    if body["model_version"].startswith("lr-"):
+        # lr 모드 — eligible window 가 0 인 경우 model_version 은 그대로 lr 유지,
+        # 단 evidence 가 no-eligible-window 시그널
+        assert any("no eligible window" in e for e in body["evidence"])

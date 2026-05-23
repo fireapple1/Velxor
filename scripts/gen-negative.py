@@ -51,17 +51,21 @@ def prep_zip_archive(zip_path: Path, n: int):
             zf.writestr(f"entry_{i:04d}.dat", f"payload-{i}\n" * 8)
 
 
-def scan_to_events(dst_dir: Path, t_start_ms: int, spread_ms: float) -> list[dict]:
+def scan_to_events(dst_dir: Path, t_start_ms: int, spread_ms: float,
+                   exclude_subdirs: tuple[str, ...] = ()) -> list[dict]:
     """결과 디렉토리 walk → 파일별 FileRename + FileWrite dual emit (positive 일관).
     ts 는 t_start + (i/n) × spread_ms 로 균등 분배 — mtime 폭주 회피.
 
     spread_ms: 합성 분포 폭. 실측 워크로드 elapsed 가 아닌 인위적 값 권장
-    (write_rate 분포 다양화 — Option D, AC5-results v3 §4.5)."""
+    (write_rate 분포 다양화 — Option D, AC5-results v3 §4.5).
+    exclude_subdirs: walk 시 무시할 서브디렉토리 이름 (예: ('node_modules',))."""
     pid = os.getpid()
     parent_pid = os.getppid()
     image_path = sys.executable
     paths = []
-    for root, _, files in os.walk(dst_dir):
+    for root, dirs, files in os.walk(dst_dir):
+        # in-place 수정으로 walk 가 무시
+        dirs[:] = [d for d in dirs if d not in exclude_subdirs]
         for name in files:
             paths.append(Path(root) / name)
     paths.sort()
@@ -187,6 +191,12 @@ LABEL_TO_DST = {
     "npm_install_express": WORK_ROOT / "git_express" / "node_modules",
 }
 
+# gitclone_express 가 npm install 이후 호출되면 node_modules 가 동일 디렉토리에
+# 적재돼 있음 — gitclone 시점의 git blob 만 잡으려면 node_modules 배제 필요.
+LABEL_EXCLUDE_SUBDIRS = {
+    "gitclone_express": ("node_modules",),
+}
+
 
 def parse_spreads(spec: str) -> list[float]:
     """'1,5,30' → [1.0, 5.0, 30.0]"""
@@ -254,7 +264,10 @@ def main():
                     if args.seed is not None:
                         random.seed(args.seed + run_idx)
                     t_start_ms = int(time.time() * 1000) + run_idx
-                    events = scan_to_events(dst, t_start_ms, spread_ms)
+                    events = scan_to_events(
+                        dst, t_start_ms, spread_ms,
+                        exclude_subdirs=LABEL_EXCLUDE_SUBDIRS.get(label, ()),
+                    )
                     if not events:
                         skips.append((f"{label}_s{spread_s:g}_run_{run_idx:02d}",
                                       "0 events"))
@@ -269,7 +282,10 @@ def main():
         else:
             # legacy: 실측 elapsed 한 번
             t_start_ms = int(time.time() * 1000)
-            events = scan_to_events(dst, t_start_ms, measured_elapsed_ms)
+            events = scan_to_events(
+                dst, t_start_ms, measured_elapsed_ms,
+                exclude_subdirs=LABEL_EXCLUDE_SUBDIRS.get(label, ()),
+            )
             if not events:
                 skips.append((label, "0 events scanned"))
                 continue

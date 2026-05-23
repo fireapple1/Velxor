@@ -49,7 +49,7 @@
 - `python-engine/features.py::slice_to_windows(events, window_ms)` 신규 — ts_unix_ms 기준 bucket 분할
 - `python-engine/model/train.py`: 각 JSONL → 1s window 단위 분할, 각 window = 1 sample (min_events=4 이하 window 제외)
 - `scripts/eval-ac5.py`: 각 file 의 max(window_proba) ≥ threshold → ransomware (실 운영 fanotify streaming semantics 와 일치)
-- **live engine (app.py) 무변** — rust-service 가 이미 1s batch 로 보내므로 그대로
+- **live engine `python-engine/app.py` 도 동일 슬라이싱 적용 (v3.1 추가, 2026-05-23)** — rust-service aggregator 가 1s debounce 기준 batch 를 보내지만 multi-second burst 도 가능 → serve 측도 `slice_to_windows + max(window_proba)` 로 train/eval 정합. no-eligible window (min_events=4 미만) 시 `benign 0.0` 응답 (Codex audit Top 5 #4 해소).
 
 이 변경으로:
 - positive simulate (ts spread ~5ms, all events in same window): 60 file × 1 window = 60 sample (변화 없음)
@@ -238,4 +238,5 @@ bash scripts/eval-ac5.sh
 |---|---|---|---|
 | v1 | 2026-05-23 | 최초 측정 + AC5 PASS (10/10 TP, 0/10 FP) + honest limitations | C |
 | v2 | 2026-05-23 | simulate v1/v2/v3 randomization 보강 (count jitter, 파일명/extension 풀, write pattern 4종, op shuffle). 데이터셋 학습 20→60 + held-out 10→30. **재평가 PASS (30/30 TP, 0/10 FP)** + §4.4/4.5 갱신 — proba 분포 한계는 합성 분포 본질이라 명시 | C |
-| v3 | 2026-05-23 | **Option D**: gen-negative `--spreads 1,5,30 --reuse` + features.py `slice_to_windows` + train/eval per-window. negative window 10→337 (33×). **재평가 PASS (30/30 TP, 0/37 FP)** + §2.2 슬라이싱 설계 + §4.5 갱신 — 양극단 proba 원인이 `write_rate` 에서 `size_mean` 직교성으로 이동 식별 (합성 file size 분포 한계). app.py / live engine 무변. | C |
+| v3 | 2026-05-23 | **Option D**: gen-negative `--spreads 1,5,30 --reuse` + features.py `slice_to_windows` + train/eval per-window. negative window 10→337 (33×). **재평가 PASS (30/30 TP, 0/37 FP)** + §2.2 슬라이싱 설계 + §4.5 갱신 — 양극단 proba 원인이 `write_rate` 에서 `size_mean` 직교성으로 이동 식별. | C |
+| v3.1 | 2026-05-23 | **CCG audit fix (Codex Top 5)**: app.py 도 `slice_to_windows + max(window_proba)` 적용해 train/serve drift 제거. app.py malformed JSON → 400, events list 검증, `MAX_CONTENT_LENGTH` 강화 (보안). rust-service classifier_client 에 `error_for_status()` 추가 (non-200 verdict 미발행 보장, schema §2.2.1). gen-negative `--reuse` 모드에 `LABEL_EXCLUDE_SUBDIRS={gitclone_express:('node_modules',)}` 적용. test 32→34 (slice + boundary + 보안 케이스). | C |
