@@ -21,158 +21,85 @@ type Props = {
   onSelect: (n: VelxorNode) => void;
 };
 
-const NODE_W = 160;
-const NODE_H = 56;
+// ★ 노드 크기를 큼직한 전문가용/사이버펑크용으로 키움
+const NODE_W = 180;
+const NODE_H = 70;
 
-function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
-  const base: React.CSSProperties = {
+function VelxorNodeView({ data, selected }: NodeProps<VelxorNode>) {
+  const isThreat = data.state === "threat";
+  const isKilled = data.state === "killed";
+
+  // 상태에 따른 색상 정의
+  const borderColor = isThreat ? "#ff3333" : isKilled ? "#30363D" : "#00C2FF";
+  const bgColor = isThreat ? "rgba(255, 77, 79, 0.15)" : isKilled ? "rgba(22, 27, 34, 0.8)" : "rgba(18, 24, 33, 0.92)";
+  const textColor = isThreat ? "#FF7B72" : isKilled ? "#8B949E" : "#E6EDF3";
+  const icon = isThreat ? "⚠️" : isKilled ? "🛑" : "⚙️";
+
+  // ★ 사이버펑크 헥사곤(Clip-path) 스타일 베이스
+  const baseStyle: React.CSSProperties = {
     width: NODE_W,
     minHeight: NODE_H,
-
-    padding: "12px 14px",
-
-    borderRadius: 14,
-
-    fontFamily: "inherit",
-    fontSize: 12,
-
+    padding: "12px 16px",
     display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-
-    overflow: "hidden",
-
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-
-    transition:
-      "border-color 0.2s ease, background 0.2s ease, transform 0.15s ease",
-
-    boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
-
+    alignItems: "center",
+    fontFamily: "inherit",
+    background: bgColor,
+    color: textColor,
+    // SF 스타일의 모서리 깎임 효과
+    clipPath: "polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px)",
+    // 가짜 테두리를 위한 outline (clip-path 사용시 border가 잘림)
+    boxShadow: selected ? `inset 0 0 0 2px ${borderColor}, 0 0 16px ${borderColor}80` : `inset 0 0 0 1px ${borderColor}`,
+    transition: "all 0.2s ease",
     backdropFilter: "blur(10px)",
+    cursor: "pointer",
+    // 핏빛 애니메이션 (threat 상태일 때만 css 클래스로 동작)
+    animation: isThreat ? "threatPulse 1s infinite" : "none",
+    filter: isKilled ? "grayscale(0.8)" : "none",
   };
-
-  let style: React.CSSProperties;
-  let className = "";
-
-  if (data.state === "threat") {
-    style = {
-      ...base,
-
-      background: "rgba(255,77,79,0.10)",
-
-      border: "1px solid rgba(255,77,79,0.45)",
-
-      color: "#FF7B72",
-    };
-  } else if (data.state === "killed") {
-    style = {
-      ...base,
-
-      background: "#161B22",
-
-      border: "1px solid #30363D",
-
-      color: "#8B949E",
-
-      opacity: 0.58,
-
-      filter: "grayscale(0.45)",
-    };
-
-    className = "velxor-node-killed";
-  } else {
-    style = {
-      ...base,
-
-      background: "rgba(18,24,33,0.92)",
-
-      border: "1px solid #1E2936",
-
-      color: "#E6EDF3",
-    };
-  }
 
   return (
     <div
-      style={style}
-      className={className}
+      style={baseStyle}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-2px)";
-        e.currentTarget.style.borderColor = "#2F81F7";
+        if (!isKilled) {
+          e.currentTarget.style.transform = "translateY(-3px)";
+          e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${borderColor}, 0 0 12px ${borderColor}60`;
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = "translateY(0px)";
-
-        if (data.state === "normal") {
-          e.currentTarget.style.borderColor = "#1E2936";
-        }
-
-        if (data.state === "threat") {
-          e.currentTarget.style.borderColor =
-            "rgba(255,77,79,0.45)";
-        }
-
-        if (data.state === "killed") {
-          e.currentTarget.style.borderColor = "#30363D";
-        }
+        e.currentTarget.style.boxShadow = selected 
+          ? `inset 0 0 0 2px ${borderColor}, 0 0 16px ${borderColor}80` 
+          : `inset 0 0 0 1px ${borderColor}`;
       }}
     >
-      <Handle
-        type="target"
-        position={Position.Top}
-        style={{
-          background: "#00C2FF",
-          border: "none",
+      {/* 연결선 핸들 (위) */}
+      <Handle type="target" position={Position.Top} style={{ background: borderColor, border: "none", width: 8, height: 8 }} />
 
-          width: 8,
-          height: 8,
-        }}
-      />
-
-      <div
-        style={{
-          fontWeight: 700,
-          fontSize: 13,
-
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-
-          marginBottom: 4,
-        }}
-      >
-        {data.label}
+      {/* 노드 내부 콘텐츠 배치 */}
+      <div style={{ fontSize: 20, marginRight: 12 }}>{icon}</div>
+      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {data.label}
+        </div>
+        
+        {/* 프로세스 경로 표시 */}
+        {typeof data.image_path === "string" && (
+          <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {data.image_path.split(/[/\\]/).pop()}
+          </div>
+        )}
+        
+        {/* PID 표시 */}
+        {typeof data.pid === "number" && (
+          <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, fontFamily: "monospace" }}>
+            PID: {data.pid}
+          </div>
+        )}
       </div>
 
-      {typeof data.image_path === "string" && (
-        <div
-          style={{
-            fontSize: 10,
-
-            opacity: 0.75,
-
-            color: "#8B949E",
-
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {data.image_path.split("/").pop()}
-        </div>
-      )}
-
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        style={{
-          background: "#00C2FF",
-          border: "none",
-
-          width: 8,
-          height: 8,
-        }}
-      />
+      {/* 연결선 핸들 (아래) */}
+      <Handle type="source" position={Position.Bottom} style={{ background: borderColor, border: "none", width: 8, height: 8 }} />
     </div>
   );
 }
@@ -185,35 +112,23 @@ function layoutFull(nodes: VelxorNode[], edges: Edge[]): VelxorNode[] {
   if (nodes.length === 0) return nodes;
 
   const g = new dagre.graphlib.Graph();
-
   g.setDefaultEdgeLabel(() => ({}));
-
   g.setGraph({
     rankdir: "TB",
-
-    nodesep: 52,
-
-    ranksep: 80,
+    nodesep: 60, // 노드가 커졌으므로 간격도 넓힘
+    ranksep: 100,
   });
 
-  nodes.forEach((n) =>
-    g.setNode(n.id, {
-      width: NODE_W,
-      height: NODE_H,
-    }),
-  );
-
+  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
   edges.forEach((e) => g.setEdge(e.source, e.target));
 
   dagre.layout(g);
 
   return nodes.map((n) => {
     const pos = g.node(n.id);
-
     return pos
       ? {
           ...n,
-
           position: {
             x: pos.x - NODE_W / 2,
             y: pos.y - NODE_H / 2,
@@ -223,15 +138,8 @@ function layoutFull(nodes: VelxorNode[], edges: Edge[]): VelxorNode[] {
   });
 }
 
-export function ProcessTree({
-  nodes,
-  edges,
-  onSelect,
-}: Props) {
-  const laidOut = useMemo(
-    () => layoutFull(nodes, edges),
-    [nodes, edges],
-  );
+export function ProcessTree({ nodes, edges, onSelect }: Props) {
+  const laidOut = useMemo(() => layoutFull(nodes, edges), [nodes, edges]);
 
   return (
     <ReactFlow
@@ -241,24 +149,20 @@ export function ProcessTree({
       onNodeClick={(_, n) => onSelect(n as VelxorNode)}
       fitView
       style={{
-        background: "#0B0F14",
+        background: "transparent", // App.tsx의 배경을 투과하기 위해 투명으로 변경
       }}
-      proOptions={{
-        hideAttribution: false,
-      }}
+      proOptions={{ hideAttribution: false }}
       defaultEdgeOptions={{
         style: {
-          stroke: "#2D3748",
+          stroke: "#00C2FF", // 엣지 색상도 사이버펑크 톤으로 변경
           strokeWidth: 1.5,
+          opacity: 0.6,
         },
+        animated: true, // 데이터가 흐르는 효과
       }}
     >
-      <Background
-        color="#1E2936"
-        gap={28}
-        size={1}
-      />
-
+      {/* 기존 React Flow의 점 배경 유지 */}
+      <Background color="#1E2936" gap={28} size={1} />
       <Controls />
     </ReactFlow>
   );

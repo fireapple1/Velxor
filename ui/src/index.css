@@ -1,26 +1,18 @@
+/* ------------------------------ */
+/* Base & Reset */
+/* ------------------------------ */
 body,
 html,
 #root {
   margin: 0;
   padding: 0;
-
   width: 100%;
   height: 100%;
-
   overflow: hidden;
-
   background: #0b0f14;
-
   color: #e6edf3;
-
-  font-family:
-    "JetBrains Mono",
-    "Fira Code",
-    "Source Code Pro",
-    monospace;
-
+  font-family: "JetBrains Mono", "Fira Code", "Source Code Pro", monospace;
   font-size: 13px;
-
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -37,25 +29,33 @@ select {
 }
 
 /* ------------------------------ */
-/* Animations */
+/* Animations (기존 + 신규 배너) */
 /* ------------------------------ */
-
 @keyframes slide-in {
   from {
     transform: translateX(24px);
     opacity: 0;
   }
-
   to {
     transform: translateX(0);
     opacity: 1;
   }
 }
 
-/* ------------------------------ */
-/* Node transition */
-/* ------------------------------ */
+@keyframes slide-down {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
 
+/* ------------------------------ */
+/* Node transition (기존) */
+/* ------------------------------ */
 .velxor-node-killed {
   transition:
     background 0.2s ease,
@@ -65,9 +65,57 @@ select {
 }
 
 /* ------------------------------ */
-/* Scrollbar */
+/* ★ NEW: 사이버펑크 헥사곤 노드 */
 /* ------------------------------ */
+.cyberpunk-node {
+  /* clip-path 적용 시 테두리가 잘리는 문제를 App.tsx의 box-shadow(inset)로 해결했습니다 */
+  transition: all 0.2s ease;
+}
 
+.pulse-animation {
+  animation: threatPulse 1s infinite;
+}
+
+@keyframes threatPulse {
+  0% { filter: drop-shadow(0 0 4px rgba(255, 51, 51, 0.5)); }
+  50% { filter: drop-shadow(0 0 16px rgba(255, 51, 51, 1)); }
+  100% { filter: drop-shadow(0 0 4px rgba(255, 51, 51, 0.5)); }
+}
+
+/* ------------------------------ */
+/* ★ NEW: 보안 로그 티커 (Ticker) */
+/* ------------------------------ */
+.ticker-wrapper {
+  width: 100%;
+  overflow: hidden;
+  background: rgba(8, 11, 15, 0.8);
+  border-bottom: 1px solid #1E2936;
+  color: #00ffcc;
+  padding: 6px 0;
+  display: flex;
+}
+
+.ticker-move {
+  display: inline-block;
+  white-space: nowrap;
+  padding-left: 100%;
+  animation: ticker 30s linear infinite;
+}
+
+.ticker-item {
+  display: inline-block;
+  padding: 0 40px;
+  opacity: 0.8;
+}
+
+@keyframes ticker {
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-100%, 0, 0); }
+}
+
+/* ------------------------------ */
+/* Scrollbar (기존) */
+/* ------------------------------ */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -87,11 +135,11 @@ select {
 }
 
 /* ------------------------------ */
-/* React Flow */
+/* React Flow (기존 커스텀 유지) */
 /* ------------------------------ */
-
 .react-flow {
-  background: #0b0f14 !important;
+  /* App.tsx에서 깐 그리드 배경이 보이도록 투명으로 변경했습니다 */
+  background: transparent !important;
 }
 
 .react-flow__background {
@@ -105,13 +153,9 @@ select {
 
 .react-flow__controls {
   background: #121821 !important;
-
   border: 1px solid #1e2936 !important;
-
   border-radius: 14px !important;
-
   overflow: hidden;
-
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.02);
@@ -120,15 +164,10 @@ select {
 .react-flow__controls-button {
   width: 36px !important;
   height: 36px !important;
-
   background: #121821 !important;
-
   border-bottom: 1px solid #1e2936 !important;
-
   color: #8b949e !important;
-
   fill: #8b949e !important;
-
   transition:
     background 0.15s ease,
     color 0.15s ease;
@@ -136,7 +175,6 @@ select {
 
 .react-flow__controls-button:hover {
   background: #1a2330 !important;
-
   color: #e6edf3 !important;
 }
 
@@ -146,29 +184,22 @@ select {
 
 .react-flow__minimap {
   background: #0f141b !important;
-
   border: 1px solid #1e2936 !important;
-
   border-radius: 12px !important;
-
   overflow: hidden;
 }
 
 /* ------------------------------ */
-/* Attribution */
+/* Attribution (기존) */
 /* ------------------------------ */
-
 .react-flow__attribution {
   background: transparent !important;
-
   color: #6e7681 !important;
-
   font-size: 10px !important;
 }
 
 .react-flow__attribution a {
   color: #8b949e !important;
-
   text-decoration: none;
 }
 
@@ -177,9 +208,8 @@ select {
 }
 
 /* ------------------------------ */
-/* Selection */
+/* Selection (기존) */
 /* ------------------------------ */
-
 ::selection {
   background: rgba(0, 194, 255, 0.2);
   color: #ffffff;
