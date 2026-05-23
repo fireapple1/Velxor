@@ -15,7 +15,7 @@ type Props = {
 
 const WINDOW_MS = 30_000;
 
-export function Timeline({ events, width = 800, height = 60 }: Props) {
+export function Timeline({ events, width = 800, height = 72 }: Props) {
   const ref = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -43,10 +43,12 @@ export function Timeline({ events, width = 800, height = 60 }: Props) {
         .ticks(5)
         .tickFormat((d) => d3.timeFormat("%H:%M:%S")(d as Date)),
     );
-    axisG.selectAll("path, line").attr("stroke", "#00ffcc55");
+    axisG
+      .selectAll("path, line")
+      .attr("stroke", "#30363D");
     axisG
       .selectAll("text")
-      .attr("fill", "#00ffcc99")
+      .attr("fill", "#8B949E")
       .attr("font-family", "monospace")
       .attr("font-size", 10);
 
@@ -57,20 +59,19 @@ export function Timeline({ events, width = 800, height = 60 }: Props) {
       .join("circle")
       .attr("class", "evt")
       .attr("cx", (e) => x(new Date(e.ts)))
-      .attr("cy", 24)
-      .attr("r", (e) => (e.type === "verdict" && e.verdict === "ransomware" ? 5 : 3))
+      .attr("cy", 28)
+      .attr("r", (e) =>
+        e.type === "verdict" && e.verdict === "ransomware"
+          ? 6
+          : 4
+      )
       .attr("fill", (e) =>
         e.type === "verdict" && e.verdict === "ransomware"
-          ? "#ff3333"
+          ? "#FF4D4F"
           : e.type === "verdict"
-            ? "#00ffcc"
-            : "#666666",
+            ? "#00C2FF"
+            : "#8B949E"
       )
-      .attr("filter", (e) =>
-        e.type === "verdict" && e.verdict === "ransomware"
-          ? "drop-shadow(0 0 4px #ff3333)"
-          : "none",
-      );
   }, [events, width, height]);
 
   return (
@@ -78,7 +79,13 @@ export function Timeline({ events, width = 800, height = 60 }: Props) {
       ref={ref}
       width={width}
       height={height}
-      style={{ background: "#0a0a0c", display: "block", borderTop: "1px solid #00ffcc22" }}
+      style={{
+        background: "#0F141B",
+
+        display: "block",
+
+        borderTop: "1px solid #1E2936",
+      }}
     />
   );
 }

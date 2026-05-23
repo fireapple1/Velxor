@@ -21,18 +21,17 @@ type Props = {
   onSelect: (n: VelxorNode) => void;
 };
 
-const NODE_W = 140;
-const NODE_H = 44;
+const NODE_W = 160;
+const NODE_H = 56;
 
 function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
   const base: React.CSSProperties = {
     width: NODE_W,
-
     minHeight: NODE_H,
 
-    padding: "12px",
+    padding: "12px 14px",
 
-    borderRadius: 12,
+    borderRadius: 14,
 
     fontFamily: "inherit",
     fontSize: 12,
@@ -47,9 +46,11 @@ function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
     textOverflow: "ellipsis",
 
     transition:
-      "border-color 0.2s ease, background 0.2s ease",
+      "border-color 0.2s ease, background 0.2s ease, transform 0.15s ease",
 
-    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.22)",
+
+    backdropFilter: "blur(10px)",
   };
 
   let style: React.CSSProperties;
@@ -58,45 +59,101 @@ function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
   if (data.state === "threat") {
     style = {
       ...base,
-      background: "rgba(255,77,79,0.08)",
-      border: "1px solid #FF4D4F",
-      color: "#FF4D4F",
+
+      background: "rgba(255,77,79,0.10)",
+
+      border: "1px solid rgba(255,77,79,0.45)",
+
+      color: "#FF7B72",
     };
   } else if (data.state === "killed") {
     style = {
       ...base,
+
       background: "#161B22",
+
       border: "1px solid #30363D",
+
       color: "#8B949E",
-      opacity: 0.55,
-      filter: "grayscale(0.4)",
+
+      opacity: 0.58,
+
+      filter: "grayscale(0.45)",
     };
+
     className = "velxor-node-killed";
   } else {
     style = {
       ...base,
-      background: "#121821",
+
+      background: "rgba(18,24,33,0.92)",
+
       border: "1px solid #1E2936",
+
       color: "#E6EDF3",
     };
   }
 
   return (
-    <div style={style} className={className}>
-      <Handle type="target" position={Position.Top} style={{
-        background: "#00C2FF",
-        border: "none",
+    <div
+      style={style}
+      className={className}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "translateY(-2px)";
+        e.currentTarget.style.borderColor = "#2F81F7";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "translateY(0px)";
 
-        width: 8,
-        height: 8,
-      }}/>
-      <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis" }}>{data.label}</div>
+        if (data.state === "normal") {
+          e.currentTarget.style.borderColor = "#1E2936";
+        }
+
+        if (data.state === "threat") {
+          e.currentTarget.style.borderColor =
+            "rgba(255,77,79,0.45)";
+        }
+
+        if (data.state === "killed") {
+          e.currentTarget.style.borderColor = "#30363D";
+        }
+      }}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{
+          background: "#00C2FF",
+          border: "none",
+
+          width: 8,
+          height: 8,
+        }}
+      />
+
+      <div
+        style={{
+          fontWeight: 700,
+          fontSize: 13,
+
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+
+          marginBottom: 4,
+        }}
+      >
+        {data.label}
+      </div>
+
       {typeof data.image_path === "string" && (
         <div
           style={{
             fontSize: 10,
-            opacity: 0.6,
+
+            opacity: 0.75,
+
             color: "#8B949E",
+
             overflow: "hidden",
             textOverflow: "ellipsis",
           }}
@@ -104,35 +161,78 @@ function VelxorNodeView({ data }: NodeProps<VelxorNode>) {
           {data.image_path.split("/").pop()}
         </div>
       )}
-      <Handle type="source" position={Position.Bottom} style={{
-        background: "#00C2FF",
-        border: "none",
 
-        width: 8,
-        height: 8,
-      }}/>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{
+          background: "#00C2FF",
+          border: "none",
+
+          width: 8,
+          height: 8,
+        }}
+      />
     </div>
   );
 }
 
-const nodeTypes: NodeTypes = { velxor: VelxorNodeView };
+const nodeTypes: NodeTypes = {
+  velxor: VelxorNodeView,
+};
 
 function layoutFull(nodes: VelxorNode[], edges: Edge[]): VelxorNode[] {
   if (nodes.length === 0) return nodes;
+
   const g = new dagre.graphlib.Graph();
+
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 60 });
-  nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
+
+  g.setGraph({
+    rankdir: "TB",
+
+    nodesep: 52,
+
+    ranksep: 80,
+  });
+
+  nodes.forEach((n) =>
+    g.setNode(n.id, {
+      width: NODE_W,
+      height: NODE_H,
+    }),
+  );
+
   edges.forEach((e) => g.setEdge(e.source, e.target));
+
   dagre.layout(g);
+
   return nodes.map((n) => {
     const pos = g.node(n.id);
-    return pos ? { ...n, position: { x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2 } } : n;
+
+    return pos
+      ? {
+          ...n,
+
+          position: {
+            x: pos.x - NODE_W / 2,
+            y: pos.y - NODE_H / 2,
+          },
+        }
+      : n;
   });
 }
 
-export function ProcessTree({ nodes, edges, onSelect }: Props) {
-  const laidOut = useMemo(() => layoutFull(nodes, edges), [nodes, edges]);
+export function ProcessTree({
+  nodes,
+  edges,
+  onSelect,
+}: Props) {
+  const laidOut = useMemo(
+    () => layoutFull(nodes, edges),
+    [nodes, edges],
+  );
+
   return (
     <ReactFlow
       nodes={laidOut}
@@ -142,20 +242,23 @@ export function ProcessTree({ nodes, edges, onSelect }: Props) {
       fitView
       style={{
         background: "#0B0F14",
-
-        backgroundImage: `
-          linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)
-        `,
-
-        backgroundSize: "32px 32px",
       }}
-      proOptions={{ hideAttribution: false }}
+      proOptions={{
+        hideAttribution: false,
+      }}
+      defaultEdgeOptions={{
+        style: {
+          stroke: "#2D3748",
+          strokeWidth: 1.5,
+        },
+      }}
     >
       <Background
-        color="rgba(255,255,255,0.04)"
-        gap={32}
+        color="#1E2936"
+        gap={28}
+        size={1}
       />
+
       <Controls />
     </ReactFlow>
   );
