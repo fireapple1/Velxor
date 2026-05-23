@@ -118,7 +118,7 @@ echo "  ✓ Xvfb :99 기동 완료 (PID=$XVFB_PID)"
 
 # ── 4. Electron 기동 ──────────────────────────────────────────
 echo "[4/6] Electron 기동 중..."
-setsid bash -c "cd '$UI_DIR' && DISPLAY=:99 npx electron dist-electron/main.js --no-sandbox" >/dev/null 2>&1 &
+setsid bash -c "cd '$UI_DIR' && DISPLAY=:99 ./node_modules/.bin/electron dist-electron/main.js --no-sandbox" >/tmp/electron.log 2>&1 &
 ELECTRON_PGID=$!
 echo "[record] Electron 창 표시 대기..."
 if ! DISPLAY=:99 timeout 10 bash -c 'until xdotool search --name "." >/dev/null 2>&1; do sleep 0.3; done'; then
