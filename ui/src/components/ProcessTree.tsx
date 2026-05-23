@@ -21,85 +21,76 @@ type Props = {
   onSelect: (n: VelxorNode) => void;
 };
 
-// ★ 노드 크기를 큼직한 전문가용/사이버펑크용으로 키움
-const NODE_W = 180;
-const NODE_H = 70;
+// ★ 납작함을 완전 해결하기 위해 가로/세로를 1:1 완벽 정대칭 정육각형 크기로 고정
+const NODE_W = 140;
+const NODE_H = 140;
 
 function VelxorNodeView({ data, selected }: NodeProps<VelxorNode>) {
   const isThreat = data.state === "threat";
   const isKilled = data.state === "killed";
 
-  // 상태에 따른 색상 정의
-  const borderColor = isThreat ? "#ff3333" : isKilled ? "#30363D" : "#00C2FF";
-  const bgColor = isThreat ? "rgba(255, 77, 79, 0.15)" : isKilled ? "rgba(22, 27, 34, 0.8)" : "rgba(18, 24, 33, 0.92)";
-  const textColor = isThreat ? "#FF7B72" : isKilled ? "#8B949E" : "#E6EDF3";
+  let modeClass = "cyber-normal";
+  if (isThreat) modeClass = "cyber-threat";
+  if (isKilled) modeClass = "cyber-killed";
+  if (selected) modeClass += " cyber-selected";
+
   const icon = isThreat ? "⚠️" : isKilled ? "🛑" : "⚙️";
 
-  // ★ 사이버펑크 헥사곤(Clip-path) 스타일 베이스
-  const baseStyle: React.CSSProperties = {
-    width: NODE_W,
-    minHeight: NODE_H,
-    padding: "12px 16px",
-    display: "flex",
-    alignItems: "center",
-    fontFamily: "inherit",
-    background: bgColor,
-    color: textColor,
-    // SF 스타일의 모서리 깎임 효과
-    clipPath: "polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px)",
-    // 가짜 테두리를 위한 outline (clip-path 사용시 border가 잘림)
-    boxShadow: selected ? `inset 0 0 0 2px ${borderColor}, 0 0 16px ${borderColor}80` : `inset 0 0 0 1px ${borderColor}`,
-    transition: "all 0.2s ease",
-    backdropFilter: "blur(10px)",
-    cursor: "pointer",
-    // 핏빛 애니메이션 (threat 상태일 때만 css 클래스로 동작)
-    animation: isThreat ? "threatPulse 1s infinite" : "none",
-    filter: isKilled ? "grayscale(0.8)" : "none",
-  };
-
   return (
-    <div
-      style={baseStyle}
-      onMouseEnter={(e) => {
-        if (!isKilled) {
-          e.currentTarget.style.transform = "translateY(-3px)";
-          e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${borderColor}, 0 0 12px ${borderColor}60`;
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0px)";
-        e.currentTarget.style.boxShadow = selected 
-          ? `inset 0 0 0 2px ${borderColor}, 0 0 16px ${borderColor}80` 
-          : `inset 0 0 0 1px ${borderColor}`;
-      }}
-    >
-      {/* 연결선 핸들 (위) */}
-      <Handle type="target" position={Position.Top} style={{ background: borderColor, border: "none", width: 8, height: 8 }} />
+    <div className={`cyber-node ${modeClass}`}>
+      {/* 완벽한 정육각형 마스크 레이어 */}
+      <div className="cyber-node-bg"></div>
+      <div className="cyber-node-inner"></div>
 
-      {/* 노드 내부 콘텐츠 배치 */}
-      <div style={{ fontSize: 20, marginRight: 12 }}>{icon}</div>
-      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <Handle type="target" position={Position.Top} className="cyber-handle" />
+
+      {/* 내부 콘텐츠: 양옆 뾰족한 정점 영역을 침범하지 않도록 내부 사각형 마진 확보 */}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "100%",
+        height: "100%",
+        textAlign: "center",
+        zIndex: 1,
+        padding: "0 20px", // 양옆 마진 확보
+        pointerEvents: "none",
+        boxSizing: "border-box"
+      }}>
+        {/* 아이콘 */}
+        <div style={{ fontSize: 18, marginBottom: 4 }}>{icon}</div>
+        
+        {/* 프로세스 이름 */}
+        <div style={{ 
+          fontWeight: 700, 
+          fontSize: 12, 
+          width: "100%", 
+          overflow: "hidden", 
+          textOverflow: "ellipsis", 
+          whiteSpace: "nowrap",
+          letterSpacing: "0.5px"
+        }}>
           {data.label}
         </div>
         
-        {/* 프로세스 경로 표시 */}
-        {typeof data.image_path === "string" && (
-          <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {data.image_path.split(/[/\\]/).pop()}
-          </div>
-        )}
-        
-        {/* PID 표시 */}
+        {/* 네온 구분선 */}
+        <div style={{ 
+          width: "45px", 
+          height: "1px", 
+          background: isThreat ? "rgba(255,51,51,0.7)" : isKilled ? "#444" : "rgba(0,194,255,0.7)", 
+          margin: "5px 0" 
+        }} />
+
+        {/* PID 출력 */}
         {typeof data.pid === "number" && (
-          <div style={{ fontSize: 10, opacity: 0.5, marginTop: 2, fontFamily: "monospace" }}>
-            PID: {data.pid}
+          <div style={{ fontSize: 10, opacity: 0.6, fontFamily: "monospace", fontWeight: 600 }}>
+            ID: {data.pid}
           </div>
         )}
       </div>
 
-      {/* 연결선 핸들 (아래) */}
-      <Handle type="source" position={Position.Bottom} style={{ background: borderColor, border: "none", width: 8, height: 8 }} />
+      <Handle type="source" position={Position.Bottom} className="cyber-handle" />
     </div>
   );
 }
@@ -115,7 +106,7 @@ function layoutFull(nodes: VelxorNode[], edges: Edge[]): VelxorNode[] {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: "TB",
-    nodesep: 60, // 노드가 커졌으므로 간격도 넓힘
+    nodesep: 75, 
     ranksep: 100,
   });
 
@@ -148,20 +139,13 @@ export function ProcessTree({ nodes, edges, onSelect }: Props) {
       nodeTypes={nodeTypes}
       onNodeClick={(_, n) => onSelect(n as VelxorNode)}
       fitView
-      style={{
-        background: "transparent", // App.tsx의 배경을 투과하기 위해 투명으로 변경
-      }}
+      style={{ background: "transparent" }}
       proOptions={{ hideAttribution: false }}
       defaultEdgeOptions={{
-        style: {
-          stroke: "#00C2FF", // 엣지 색상도 사이버펑크 톤으로 변경
-          strokeWidth: 1.5,
-          opacity: 0.6,
-        },
-        animated: true, // 데이터가 흐르는 효과
+        style: { stroke: "#00C2FF", strokeWidth: 1.5, opacity: 0.5 },
+        animated: true,
       }}
     >
-      {/* 기존 React Flow의 점 배경 유지 */}
       <Background color="#1E2936" gap={28} size={1} />
       <Controls />
     </ReactFlow>
