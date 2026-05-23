@@ -80,7 +80,6 @@ export default function App() {
   const [timelineEvents, setTimelineEvents] =
     useState<TimelineEvent[]>([]);
 
-  // ★ 추가된 부분: 상단 배너 상태 관리
   const [criticalBanner, setCriticalBanner] = useState<{
     pid: number;
     message: string;
@@ -90,32 +89,60 @@ export default function App() {
 
   const handleMessage = useCallback((m: WsMessage) => {
     if (m.type === "node_add") {
-      const payload = m.payload as BehaviorEventV1;
+      // payload를 any로 확장하여 parent_pid와 image_path를 안전하게 추출합니다.
+      const payload = m.payload as any;
 
       const pid = payload.pid;
-
+      const parentPid = payload.parent_pid;
+      
       if (pid === undefined || pid === null) return;
 
       const id = String(pid);
+      
+      // ★ 텅 빈 노드를 채우기 위해 프로세스 이름(image_path) 추출
+      const processName = payload.image_path 
+        ? payload.image_path.split(/[/\\]/).pop() 
+        : "Unknown Process";
 
       setNodes((ns) => {
         if (ns.some((n) => n.id === id)) return ns;
 
         const data: VelxorNodeData = {
           ...payload,
-          label: `pid ${pid}`,
+          label: `${processName}\nPID: ${pid}`, // 노드에 이름과 PID를 함께 표시
           state: "normal",
         };
 
+        // 노드들이 한 점에 겹치지 않도록 계단식으로 약간씩 흩뿌려줍니다.
+        const offset = (ns.length % 15) * 40;
         const next: VelxorNode = {
           id,
           type: "velxor",
           data,
-          position: { x: 0, y: 0 },
+          position: { x: 50 + offset, y: 50 + offset },
         };
 
         return [...ns, next];
       });
+
+      // ★ 부모-자식을 이어주는 네온 연결선(Edge) 생성 로직 추가
+      if (parentPid && parentPid !== 0) {
+        setEdges((es) => {
+          const edgeId = `e-${parentPid}-${pid}`;
+          if (es.some((e) => e.id === edgeId)) return es;
+          
+          return [
+            ...es,
+            {
+              id: edgeId,
+              source: String(parentPid),
+              target: String(pid),
+              animated: true, // 데이터가 흐르는 애니메이션
+              style: { stroke: "#00ffcc", strokeWidth: 1.5, opacity: 0.6 },
+            },
+          ];
+        });
+      }
 
       setTimelineEvents((es) =>
         appendTimelineCapped(es, {
@@ -160,7 +187,6 @@ export default function App() {
       );
 
       if (v.verdict === "ransomware") {
-        // ★ 추가된 부분: 랜섬웨어 감지 시 배너 정보 세팅
         setCriticalBanner({
           pid: v.pid,
           message: `PID ${v.pid} 프로세스에서 악성 암호화 행위가 감지되었습니다.`,
@@ -180,6 +206,15 @@ export default function App() {
               },
             };
           }),
+        );
+        
+        // ★ 위협이 감지된 노드의 연결선(Edge)도 붉은색으로 강조
+        setEdges((es) =>
+          es.map((e) =>
+            e.target === String(v.pid)
+              ? { ...e, style: { stroke: "#ff3333", strokeWidth: 2, opacity: 1 } }
+              : e
+          )
         );
       }
     }
@@ -203,8 +238,6 @@ export default function App() {
       setVerdict(null);
       setSelectedPid(null);
       setTimelineEvents([]);
-      
-      // ★ 추가된 부분: 화면이 전체 리셋될 때 배너도 함께 닫아줌
       setCriticalBanner(null); 
 
       killedPidsRef.current.clear();
@@ -308,7 +341,6 @@ export default function App() {
         alerts={alerts}
       />
 
-      {/* ★ 추가된 부분: 랜섬웨어 감지 시 뚝 떨어지는 핏빛 ALERT 배너 */}
       {criticalBanner && (
         <div
           style={{
