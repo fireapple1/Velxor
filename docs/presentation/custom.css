@@ -1,0 +1,256 @@
+/* ============================================================
+   Velxor Presentation — custom.css
+   reveal.js 5.1.0 / theme: black
+   ============================================================ */
+
+/* ── Korean font via CDN (Pretendard) ── */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+
+:root {
+  --velxor-red:    #ff5252;
+  --velxor-amber:  #f0c040;
+  --velxor-dim:    #aaaaaa;
+  --velxor-border: #444444;
+  --velxor-bg-alt: #161616;
+  --velxor-green:  #69ff47;
+  --velxor-blue:   #40c8ff;
+  --slide-pad: 0 2.4rem;
+}
+
+/* ── Base font override ── */
+.reveal,
+.reveal h1, .reveal h2, .reveal h3,
+.reveal p, .reveal li, .reveal td, .reveal th {
+  font-family: 'Pretendard Variable', Pretendard, -apple-system,
+               'Apple SD Gothic Neo', sans-serif !important;
+}
+
+.reveal h1 { font-size: 1.9em; letter-spacing: -0.02em; }
+.reveal h2 { font-size: 1.5em; letter-spacing: -0.01em; border-bottom: 2px solid var(--velxor-border); padding-bottom: 0.2em; margin-bottom: 0.6em; }
+.reveal h3 { font-size: 1.1em; color: var(--velxor-dim); font-weight: 600; }
+
+/* ── Section padding ── */
+.reveal .slides section { padding: var(--slide-pad); }
+
+/* ── Big numbers (AC4, AC5) ── */
+.big-num {
+  font-size: 4.2em;
+  font-weight: 800;
+  color: var(--velxor-red);
+  line-height: 1;
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+.big-num.green  { color: var(--velxor-green); }
+.big-num.amber  { color: var(--velxor-amber); }
+.big-num.blue   { color: var(--velxor-blue);  }
+
+/* ── Demo grid (slide 8) ── */
+.demo-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 24px;
+  align-items: center;
+  margin-top: 0.8rem;
+}
+
+/* ── Placeholder slot ── */
+.slot {
+  border: 2px dashed #888;
+  padding: 8px;
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+  color: #aaa;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+}
+
+/* ── Disclaimer box (slide 11) ── */
+.disclaimer {
+  background: #2a1f00;
+  border-left: 6px solid var(--velxor-amber);
+  padding: 16px 22px;
+  border-radius: 4px;
+  text-align: left;
+  margin: 0.4em 0;
+}
+.disclaimer li { font-size: 0.82em; line-height: 1.7; color: #e8d8a0; }
+.disclaimer strong { color: var(--velxor-amber); }
+
+/* ── Gate matrix / data table ── */
+.gate-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78em;
+  margin-top: 0.6em;
+}
+.gate-table th {
+  background: #222;
+  color: var(--velxor-amber);
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 2px solid var(--velxor-border);
+}
+.gate-table td {
+  padding: 5px 12px;
+  border-bottom: 1px solid #2a2a2a;
+  vertical-align: middle;
+}
+.gate-table tr:hover td { background: rgba(255,255,255,0.04); }
+.pass  { color: var(--velxor-green); font-weight: 700; }
+.fail  { color: var(--velxor-red);   font-weight: 700; }
+
+/* ── Architecture diagram ── */
+.arch-diagram {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
+  font-size: 0.72em;
+  background: #0d0d0d;
+  border: 1px solid var(--velxor-border);
+  border-radius: 8px;
+  padding: 1.2em 1.6em;
+  text-align: left;
+  line-height: 1.8;
+  white-space: pre;
+}
+.arch-layer { color: #ddd; }
+.arch-arrow { color: var(--velxor-amber); }
+.arch-port  { color: var(--velxor-blue);  font-size: 0.9em; }
+.arch-note  { color: var(--velxor-dim);   font-size: 0.88em; }
+
+/* ── Feature chips ── */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 0.8em;
+}
+.feature-chip {
+  background: #1a1a1a;
+  border: 1px solid var(--velxor-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 0.75em;
+  text-align: left;
+}
+.feature-chip .fc-name { color: var(--velxor-blue); font-weight: 700; display: block; margin-bottom: 2px; }
+.feature-chip .fc-desc { color: var(--velxor-dim); }
+
+/* ── Metric row ── */
+.metric-row {
+  display: flex;
+  gap: 2rem;
+  justify-content: center;
+  align-items: flex-end;
+  margin: 0.6em 0;
+}
+.metric-block { text-align: center; }
+.metric-block .mb-label { font-size: 0.7em; color: var(--velxor-dim); display: block; margin-top: 4px; }
+.metric-block .mb-gate  { font-size: 0.65em; color: #666; display: block; }
+
+/* ── Outcome chips (AC6) ── */
+.outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 0.6em;
+}
+.outcome-chip {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 5px;
+  padding: 7px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62em;
+  color: var(--velxor-blue);
+}
+
+/* ── Title slide accent ── */
+.title-badge {
+  display: inline-block;
+  background: var(--velxor-red);
+  color: #fff;
+  font-size: 0.55em;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+  margin-left: 0.4em;
+}
+
+/* ── AC gate ALL PASS badge ── */
+.all-pass-badge {
+  display: inline-block;
+  background: var(--velxor-green);
+  color: #000;
+  font-weight: 800;
+  font-size: 0.8em;
+  padding: 4px 16px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+/* ── Timeline dot (closed loop annotation) ── */
+.closed-loop {
+  font-size: 0.78em;
+  color: var(--velxor-amber);
+  border: 1px solid var(--velxor-amber);
+  border-radius: 4px;
+  display: inline-block;
+  padding: 4px 14px;
+  margin-top: 0.6em;
+}
+
+/* ── Video / img in demo slot ── */
+.demo-grid video,
+.demo-grid img {
+  max-width: 100%;
+  max-height: 340px;
+  border-radius: 6px;
+  border: 1px solid var(--velxor-border);
+}
+
+/* ── Caption text ── */
+.caption {
+  font-size: 0.6em;
+  color: var(--velxor-dim);
+  margin-top: 6px;
+  display: block;
+}
+
+/* ── Smaller list text ── */
+.reveal .slides ul.dense li,
+.reveal .slides ol.dense li {
+  font-size: 0.82em;
+  line-height: 1.65;
+  margin-bottom: 0.25em;
+}
+
+/* ── Keyword highlight in prose ── */
+.kw { color: var(--velxor-amber); font-weight: 700; }
+.kw-red { color: var(--velxor-red); font-weight: 700; }
+.kw-blue { color: var(--velxor-blue); font-weight: 700; }
+.kw-green { color: var(--velxor-green); font-weight: 700; }
+
+/* ── Separator rule ── */
+.reveal hr {
+  border: none;
+  border-top: 1px solid var(--velxor-border);
+  margin: 0.8em 0;
+}
+
+/* ── Speaker note styling (in notes window) ── */
+.reveal .speaker-notes aside.notes { font-size: 0.9em; }
+
+/* ── Fragment fade-in override for dark theme readability ── */
+.reveal .fragment.highlight-red.visible  { color: var(--velxor-red); }
+.reveal .fragment.highlight-green.visible{ color: var(--velxor-green); }
+
+/* ── Responsive tweaks ── */
+@media (max-width: 900px) {
+  .demo-grid        { grid-template-columns: 1fr; }
+  .feature-grid     { grid-template-columns: repeat(2, 1fr); }
+  .outcome-grid     { grid-template-columns: repeat(2, 1fr); }
+  .big-num          { font-size: 3em; }
+}

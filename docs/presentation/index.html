@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velxor — 랜섬웨어 행위 탐지·차단 시스템 발표</title>
+
+  <!-- reveal.js 5.1.0 CDN (jsDelivr) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="custom.css">
+</head>
+<body>
+
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 1 — 타이틀
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h1>
+        Velxor
+        <span class="title-badge">졸업프로젝트</span>
+      </h1>
+      <h3>Ubuntu 24.04 fanotify 기반<br>랜섬웨어 행위 탐지·시각화·차단 데모</h3>
+      <hr>
+      <p style="margin-top:0.8em; font-size:0.85em; color:#ccc;">
+        <span class="kw">Rust</span> collector + aggregator + WebSocket &nbsp;|&nbsp;
+        <span class="kw">Python</span> Flask + Waitress LR 분류 &nbsp;|&nbsp;
+        <span class="kw">Electron</span> + React + TypeScript UI
+      </p>
+      <p style="margin-top:1em;">
+        <span class="closed-loop">⚡ burst 감지 → alert → block &nbsp;<strong>1초 이내</strong></span>
+      </p>
+      <p style="margin-top:1.4em; font-size:0.65em; color:#555;">
+        발표자: [이름 · 학번 placeholder] &nbsp;|&nbsp; 2026-05-23
+      </p>
+      <aside class="notes">
+        10분 안에 문제·아키텍처·수치·라이브 시연·한계 순으로 진행합니다.
+        타이머 시작 — 30초 안에 넘어갑니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 2 — 문제 정의
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>문제 정의</h2>
+      <ul class="dense">
+        <li>
+          <span class="kw-red">랜섬웨어</span> = 파일 대량 암호화·이름 변경 후 몸값 요구
+          <br><small style="color:#888;">수백~수천 개 파일을 수 초 만에 처리 → 탐지 지연이 곧 피해</small>
+        </li>
+        <li style="margin-top:0.6em;">
+          <span class="kw-red">시그니처 기반 한계</span> — 신종·변종에 속수무책, zero-day 대응 불가
+        </li>
+        <li style="margin-top:0.6em;">
+          <span class="kw-green">행위 기반 탐지</span> — "무엇을 하는가"를 실시간 관찰
+          <ul style="margin-top:0.3em;">
+            <li>파일 write 속도, 확장자 다양성, rename 비율 등 feature 추출</li>
+            <li>Logistic Regression으로 랜섬웨어 확률 예측</li>
+          </ul>
+        </li>
+        <li style="margin-top:0.6em;">
+          <span class="kw-blue">userspace fanotify</span> — Linux 커널 파일시스템 이벤트 API
+          <br><small style="color:#888;">원안: Windows kernel minifilter → BSOD·test-signing 부담 → Ubuntu fanotify로 마이그레이션</small>
+        </li>
+      </ul>
+      <aside class="notes">
+        Windows kernel minifilter 원안에서 BSOD/test-signing 회피 위해 Ubuntu fanotify로 마이그레이션.
+        fanotify는 root 권한으로 마운트 레벨 이벤트를 수신합니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 3 — 아키텍처 (4-layer)
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>시스템 아키텍처 — 4계층</h2>
+      <div class="arch-diagram"><span class="arch-layer">┌─────────────────────────────────────────────────────┐
+│  ① Rust Collector                                   │
+│     fanotify / events.jsonl 폴링 (STUB 모드)         │
+└──────────────────┬──────────────────────────────────┘
+                   │ BehaviorEventV1 (JSONL, schema v1.1)
+                   ▼
+┌─────────────────────────────────────────────────────┐
+│  ② Rust Aggregator                                  │
+│     1초 sliding window · burst 감지                  │
+│     FileWrite ≥ 50/s  or  FileRename ≥ 30/s         │
+└──────────────────┬──────────────────────────────────┘</span>
+          <span class="arch-arrow">         REST POST /classify</span>  <span class="arch-port">:8765</span>
+          <span class="arch-arrow">         ─────────────────────▶</span>
+<span class="arch-layer">┌─────────────────────────────────────────────────────┐
+│  ③ Python 분류 엔진                                  │
+│     Flask + Waitress (threads=4)                    │
+│     LR predict_proba → verdict (lr / rules / fallback) │
+└──────────────────┬──────────────────────────────────┘</span>
+                   │ ClassifyResponseV1
+                   ▼
+<span class="arch-layer">┌─────────────────────────────────────────────────────┐
+│  ④ Electron + React UI                              │
+│     WebSocket  </span><span class="arch-port">:7000</span><span class="arch-layer">  +  REST  </span><span class="arch-port">:7001</span><span class="arch-layer">              │
+│     실시간 타임라인 · alert 배너 · Block 버튼        │
+└─────────────────────────────────────────────────────┘</span></div>
+      <aside class="notes">
+        4계층 단방향 파이프라인, 각 경계는 schema v1.1로 고정.
+        Rust가 WS :7000과 REST :7001을 동시에 serve합니다.
+        Python engine은 :8765에서 classify 전용으로 동작합니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 4 — 데이터 모델
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>데이터 모델 — BehaviorEventV1</h2>
+      <pre><code class="language-json" data-trim>// JSONL 1줄 = JSON 객체 1개 (줄바꿈 없음)
+{
+  "schema_version": "1.1",
+  "pid": 12345,
+  "timestamp_ms": 1716450000000,
+  "write_rate": 62.0,      // FileWrite/s  ← burst gate 50/s
+  "rename_rate": 0.0,      // FileRename/s ← burst gate 30/s
+  "ext_diversity": 0.91,   // Shannon entropy of extensions
+  "delete_rate": 5.0,
+  "read_write_ratio": 0.08,
+  "mean_file_size": 4096
+}</code></pre>
+      <div class="feature-grid" style="margin-top:0.5em;">
+        <div class="feature-chip">
+          <span class="fc-name">write_rate</span>
+          <span class="fc-desc">1초 window FileWrite/s</span>
+        </div>
+        <div class="feature-chip">
+          <span class="fc-name">ext_diversity</span>
+          <span class="fc-desc">확장자 Shannon entropy</span>
+        </div>
+        <div class="feature-chip">
+          <span class="fc-name">rename_rate</span>
+          <span class="fc-desc">FileRename/s</span>
+        </div>
+        <div class="feature-chip">
+          <span class="fc-name">delete_rate</span>
+          <span class="fc-desc">FileDelete/s</span>
+        </div>
+        <div class="feature-chip">
+          <span class="fc-name">read_write_ratio</span>
+          <span class="fc-desc">read ÷ write</span>
+        </div>
+        <div class="feature-chip">
+          <span class="fc-name">mean_file_size</span>
+          <span class="fc-desc">평균 파일 크기 (bytes)</span>
+        </div>
+      </div>
+      <p style="font-size:0.62em; color:#777; margin-top:0.5em;">
+        큐: 1024 saturating drop &nbsp;|&nbsp; schema v1.0 → v1.1 additive 진화 (하위 호환)
+      </p>
+      <aside class="notes">
+        schema 동시 지원 — downstream consumer가 strict 모드로 옮겨갈 때까지 v1.0 필드도 유지.
+        큐 포화 시 drop이 발생하지만 dedupe violation은 0입니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 5 — 분류 엔진
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>분류 엔진 — Logistic Regression</h2>
+      <p style="font-size:0.78em; color:#ccc; margin-bottom:0.6em;">
+        6 features → <code>model.pkl</code> LR <code>predict_proba</code> → verdict
+      </p>
+      <pre><code class="language-python" data-trim>def classify(features: dict) -> ClassifyResponseV1:
+    proba = lr_model.predict_proba([feature_vector])[0][1]
+    if proba >= 0.5:
+        source = "lr"                   # lr-2026w7
+    elif rules_engine.matches(features):
+        source = "rules"                # rules-v1
+    else:
+        source = "rules-fallback"       # rules-fallback-v1
+    return ClassifyResponseV1(
+        label="ransomware" if proba >= 0.5 else "benign",
+        confidence=float(proba),
+        source=source,
+    )</code></pre>
+      <div style="display:flex; gap:12px; margin-top:0.7em; justify-content:center; flex-wrap:wrap;">
+        <div style="background:#1a1a1a; border:1px solid #444; border-radius:5px; padding:8px 16px; font-size:0.7em;">
+          <span class="kw-blue">lr-2026w7</span><br><span style="color:#888;">학습 모델 (predict_proba)</span>
+        </div>
+        <div style="background:#1a1a1a; border:1px solid #444; border-radius:5px; padding:8px 16px; font-size:0.7em;">
+          <span class="kw-amber">rules-v1</span><br><span style="color:#888;">규칙 기반 fallback</span>
+        </div>
+        <div style="background:#1a1a1a; border:1px solid #444; border-radius:5px; padding:8px 16px; font-size:0.7em;">
+          <span class="kw">rules-fallback-v1</span><br><span style="color:#888;">최후 fallback</span>
+        </div>
+      </div>
+      <p style="font-size:0.62em; color:#666; margin-top:0.5em;">
+        학습: positive 60개 + negative 10개 &nbsp;|&nbsp; class_weight=balanced (6:1 보정)
+        &nbsp;|&nbsp; Flask + Waitress threads=4
+      </p>
+      <aside class="notes">
+        lr-2026w7 / rules-v1 / rules-fallback-v1 — 의도된 3-way 분기입니다.
+        LR이 실패하거나 threshold 미달이면 rules 엔진이 이어받습니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 6 — 성능 AC4
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>성능 — AC4</h2>
+      <div class="metric-row">
+        <div class="metric-block">
+          <span class="big-num">6</span><span style="font-size:1.8em; color:#ff5252; font-weight:800;">ms</span>
+          <span class="mb-label">classify p99</span>
+          <span class="mb-gate">게이트: 100ms &nbsp;|&nbsp; <span class="kw-green">7.7× 여유</span></span>
+        </div>
+        <div class="metric-block" style="opacity:0.5; font-size:1.4em; color:#555; align-self:center;">vs</div>
+        <div class="metric-block">
+          <span class="big-num blue" style="font-size:3em;">265</span><span style="font-size:1.4em; color:#40c8ff; font-weight:800;">ms</span>
+          <span class="mb-label">event → WS p99</span>
+          <span class="mb-gate">게이트: 1000ms &nbsp;|&nbsp; <span class="kw-green">3.8× 여유</span></span>
+        </div>
+      </div>
+      <hr>
+      <table class="gate-table" style="margin-top:0.6em;">
+        <thead>
+          <tr>
+            <th>측정 지표</th>
+            <th>실측 p99</th>
+            <th>AC 게이트</th>
+            <th>여유</th>
+            <th>판정</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>classify latency</td>
+            <td><strong style="color:#ff5252;">6 ms</strong></td>
+            <td>100 ms</td>
+            <td>7.7×</td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>event → WS latency</td>
+            <td><strong style="color:#40c8ff;">265 ms</strong></td>
+            <td>1000 ms</td>
+            <td>3.8×</td>
+            <td class="pass">PASS</td>
+          </tr>
+        </tbody>
+      </table>
+      <aside class="notes">
+        AC4 sub-budget 한참 밑, 실시간성 충족.
+        classify 6ms는 단일 노트북 기준이며 Waitress threads=4 환경에서 측정했습니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 7 — 정확도 AC5
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>정확도 — AC5</h2>
+      <div class="metric-row" style="margin-top:0.8em;">
+        <div class="metric-block">
+          <span class="big-num green">30<span style="font-size:0.5em; color:#aaa;"> / </span>30</span>
+          <span class="mb-label">True Positive</span>
+          <span class="mb-gate">TP Rate = <span class="kw-green">1.000</span></span>
+        </div>
+        <div class="metric-block" style="font-size:1.6em; color:#555; align-self:center;">·</div>
+        <div class="metric-block">
+          <span class="big-num amber">0<span style="font-size:0.5em; color:#aaa;"> / </span>10</span>
+          <span class="mb-label">False Positive</span>
+          <span class="mb-gate">FP Rate = <span class="kw-green">0.000</span></span>
+        </div>
+      </div>
+      <hr>
+      <table class="gate-table" style="margin-top:0.5em;">
+        <thead>
+          <tr>
+            <th>샘플</th>
+            <th>수량</th>
+            <th>결과</th>
+            <th>판정</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>ransomware PoC (positive)</td>
+            <td>30개</td>
+            <td><strong class="kw-green">전부 탐지</strong></td>
+            <td class="pass">PASS</td>
+          </tr>
+          <tr>
+            <td>정상 프로세스 (negative)</td>
+            <td>10개</td>
+            <td><strong class="kw-green">오탐 0건</strong></td>
+            <td class="pass">PASS</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:0.62em; color:#888; margin-top:0.6em;">
+        학습: positive 60 + negative 10 / class_weight=balanced (6:1 보정) &nbsp;|&nbsp;
+        ※ 다음 슬라이드에서 합성 PoC 한계 명시
+      </p>
+      <aside class="notes">
+        다음 슬라이드에서 합성 PoC 한계를 명시합니다.
+        수치가 좋은 이유 중 하나는 합성 데이터 기반이기 때문입니다 — 평가자가 반드시 묻는 질문입니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 8 — 라이브 시연 AC3
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>라이브 시연 — AC3</h2>
+      <!-- TODO(asset-swap): UI 수정 후 record-demo.sh 재실행 결과로 교체 -->
+      <div class="demo-grid">
+        <div>
+          <video controls muted playsinline
+                 data-src="assets/demo/ac3-demo.mp4"
+                 style="width:100%; max-height:340px; border-radius:6px; border:1px solid #444;">
+            <source src="assets/demo/ac3-demo.mp4" type="video/mp4">
+            브라우저가 video 태그를 지원하지 않습니다.
+          </video>
+          <span class="caption">AC3 데모 영상 (약 30초) — VELXOR_STUB=engine 모드</span>
+        </div>
+        <div>
+          <img data-src="assets/demo/frames/f_4.png"
+               src="assets/demo/frames/f_4.png"
+               alt="burst 직후 UI 캡처 — alert 배너 + 타임라인 빨간 점"
+               style="width:100%; max-height:320px; border-radius:6px; border:1px solid #444; object-fit:contain; background:#111;">
+          <span class="caption">burst 직후 — alert 배너 + 타임라인 빨간 점</span>
+        </div>
+      </div>
+      <p style="font-size:0.62em; color:#888; margin-top:0.5em;">
+        <span class="kw-amber">STUB=engine</span>: Rust collector + fanotify는 실제 동작 /
+        Python engine만 confidence 0.95 하드코드 (분류 정확도 검증 제외, UI·WS 파이프라인 검증)
+      </p>
+      <aside class="notes">
+        STUB=engine 모드 — Rust+fanotify는 실제, engine만 0.95 하드코드.
+        burst 발생 → aggregator가 /classify 호출 → engine 0.95 반환 → WS broadcast → UI alert 배너 표시.
+        이 흐름 전체가 1초 이내에 완결됩니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 9 — 차단 동작 AC6
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>차단 동작 — AC6</h2>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.2em; align-items:start;">
+        <div>
+          <h3 style="font-size:0.85em; color:#f0c040; margin-bottom:0.5em;">차단 시퀀스</h3>
+          <pre><code class="language-text" data-trim>UI Block 버튼 클릭
+    │
+    ▼
+POST /block/{pid}   (:7001)
+    │
+    ▼
+kill(pid, SIGTERM)
+    │
+    200ms 대기
+    │
+    ├── 프로세스 종료? ──▶ terminated_sigterm
+    │
+    └── 생존? ──▶ kill(pid, SIGKILL)
+                      └──▶ terminated_sigkill</code></pre>
+        </div>
+        <div>
+          <h3 style="font-size:0.85em; color:#f0c040; margin-bottom:0.5em;">outcome enum (6종)</h3>
+          <div class="outcome-grid">
+            <div class="outcome-chip">terminated_sigterm</div>
+            <div class="outcome-chip">terminated_sigkill</div>
+            <div class="outcome-chip">already_gone</div>
+            <div class="outcome-chip">permission_denied</div>
+            <div class="outcome-chip">invalid_pid</div>
+            <div class="outcome-chip">internal_error</div>
+          </div>
+          <p style="font-size:0.62em; color:#888; margin-top:0.8em;">
+            이미 죽은 프로세스 → <code>already_gone</code><br>
+            EPERM → <code>permission_denied</code> (명시적 enum)
+          </p>
+        </div>
+      </div>
+      <aside class="notes">
+        이미 죽은 프로세스 already_gone, EPERM도 명시적 enum으로 처리합니다.
+        SIGTERM → 200ms → SIGKILL 순서이며 outcome 6종 모두 테스트로 검증했습니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 10 — 안정성 AC7
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>안정성 — AC7</h2>
+      <div class="metric-row" style="margin-top:1em; flex-wrap:wrap; gap:1.6rem;">
+        <div class="metric-block">
+          <span class="big-num green" style="font-size:3.2em;">5<span style="font-size:0.45em; color:#aaa;">분</span></span>
+          <span class="mb-label">sustained dev run</span>
+        </div>
+        <div class="metric-block">
+          <span class="big-num green" style="font-size:3.2em;">0<span style="font-size:0.45em; color:#aaa;">%</span></span>
+          <span class="mb-label">RSS 메모리 증가</span>
+          <span class="mb-gate">(Δ = 0%)</span>
+        </div>
+        <div class="metric-block">
+          <span class="big-num green" style="font-size:3.2em;">100<span style="font-size:0.45em; color:#aaa;">%</span></span>
+          <span class="mb-label">health check 응답</span>
+        </div>
+        <div class="metric-block">
+          <span class="big-num green" style="font-size:3.2em;">0</span>
+          <span class="mb-label">classify_failed</span>
+        </div>
+      </div>
+      <hr>
+      <p style="font-size:0.72em; color:#aaa; margin-top:0.4em;">
+        메모리 누수 없음 &nbsp;·&nbsp; 분류 실패 0 &nbsp;·&nbsp;
+        <span class="kw-green">데모 도중 절대 죽지 않습니다</span>
+      </p>
+      <aside class="notes">
+        dev 5분 sustained run — RSS Δ 0%, health 100%, classify_failed 0.
+        메모리 누수 없음, 분류 실패 0 — 데모 도중 죽지 않습니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 11 — 정직성 Disclaimer
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>정직성 Disclaimer</h2>
+      <div class="disclaimer">
+        <ul class="dense">
+          <li>
+            <strong>합성 PoC 기준</strong> — AC5 수치(TP 30/30, FP 0/10)는 합성 생성 샘플 대상.
+            실제 랜섬웨어(real-world malware) 미검증.
+            <em style="color:#aaa; font-size:0.88em;">(synthetic PoC, not real-world malware)</em>
+          </li>
+          <li>
+            <strong>AC3 영상 STUB=engine 모드</strong> — Rust+fanotify는 실제 동작,
+            Python 분류 엔진만 confidence <code>0.95</code> 하드코드.
+            분류 정확도가 아닌 파이프라인(UI·WS·aggregator)을 검증하는 영상.
+          </li>
+          <li>
+            <strong>gen-negative 합성 한계</strong> — negative 샘플은 1초 window 정규화 기준으로
+            생성. 실제 정상 프로세스의 다양한 파일 I/O 패턴을 완전히 커버하지 않음.
+          </li>
+          <li>
+            <strong>FAN_RENAME / FAN_REPORT_DFID_NAME v1.1 deferred</strong> —
+            rename 이벤트에서 정확한 file_path 추출은 미구현 (Future Work).
+          </li>
+        </ul>
+      </div>
+      <p style="font-size:0.65em; color:#666; margin-top:0.7em;">
+        ※ 이 부분 숨기지 않습니다 — 평가자가 가장 먼저 묻는 질문입니다.
+      </p>
+      <aside class="notes">
+        이 슬라이드는 빠르게 넘기지 말고 또렷하게 읽으세요.
+        평가자가 "real-world ransomware에서도 동작하나요?"를 반드시 묻습니다.
+        "합성 PoC 기준이며, Future Work에 real-world corpus 평가가 포함됩니다"라고 답하세요.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 12 — 한계 / Future Work
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>한계 / Future Work</h2>
+      <table class="gate-table">
+        <thead>
+          <tr>
+            <th>항목</th>
+            <th>현재 상태</th>
+            <th>다음 단계</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>평가 데이터셋</td>
+            <td><span style="color:#f0c040;">합성 PoC</span></td>
+            <td>real-world corpus 평가 (VirusTotal 샘플 등)</td>
+          </tr>
+          <tr>
+            <td>FAN_REPORT_DFID_NAME</td>
+            <td><span style="color:#f0c040;">deferred</span></td>
+            <td>전환 → 정확한 file_path 추출 구현</td>
+          </tr>
+          <tr>
+            <td>플랫폼 호환성</td>
+            <td><span style="color:#f0c040;">Ubuntu 24.04 only</span></td>
+            <td>26.04 / RHEL 9 / Arch cross-distro 검증</td>
+          </tr>
+          <tr>
+            <td>분류 클래스</td>
+            <td><span style="color:#f0c040;">ransomware 이진 분류</span></td>
+            <td>multi-class: ransomware / cryptominer / data-exfil</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="font-size:0.65em; color:#777; margin-top:0.8em;">
+        졸업프로젝트 범위는 여기까지 — 위 항목이 다음 단계입니다.
+      </p>
+      <aside class="notes">
+        졸업프로젝트 범위는 여기까지, 다음 단계를 명확히 제시합니다.
+        FAN_REPORT_DFID_NAME은 Linux 5.9+ 에서 지원되는 기능으로, 구현 시 file_path 정확도가 크게 향상됩니다.
+      </aside>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         슬라이드 13 — 마무리 + Q&A
+    ══════════════════════════════════════════════ -->
+    <section>
+      <h2>마무리</h2>
+      <div style="margin: 0.6em 0 0.8em;">
+        <span class="all-pass-badge">13 AC gate &nbsp; ALL PASS</span>
+      </div>
+      <ul class="dense" style="margin-bottom:0.8em;">
+        <li>fanotify 기반 실시간 행위 탐지 → <span class="kw-green">단일 노트북 1초 closed loop</span></li>
+        <li>classify p99 <span class="kw-red">6ms</span> (게이트 100ms, 7.7× 여유)</li>
+        <li>TP <span class="kw-green">30/30</span> · FP <span class="kw-green">0/10</span> (합성 PoC 기준)</li>
+        <li>5분 sustained run / RSS Δ 0% / classify_failed 0</li>
+        <li>Disclaimer 포함 — 합성 PoC, STUB=engine 영상, FAN_RENAME deferred</li>
+      </ul>
+      <hr>
+      <p style="font-size:0.75em; color:#888; margin-bottom:0.4em;">
+        GitHub: <code style="color:#40c8ff;">[github.com/your-org/velxor — placeholder]</code>
+      </p>
+      <p style="font-size:1.4em; font-weight:700; margin-top:0.6em; color:#fff;">
+        감사합니다. &nbsp; 질문 받겠습니다.
+      </p>
+      <aside class="notes">
+        리허설 3회 PASS — dropped 0, dedupe violations 0.
+        질문 예상:
+        1. "real-world malware에서도 되나요?" → 합성 PoC 기준, Future Work 참조
+        2. "fanotify root 권한 필요한가요?" → 예, mount-level 이벤트는 root 필수
+        3. "모델 재학습은 어떻게?" → positive 60 + negative 10, class_weight=balanced
+      </aside>
+    </section>
+
+  </div><!-- /.slides -->
+</div><!-- /.reveal -->
+
+<!-- reveal.js 5.1.0 ESM -->
+<script type="module">
+  import Reveal from 'https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.esm.js';
+  import Notes from 'https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.esm.js';
+  import Highlight from 'https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.esm.js';
+
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    controls: true,
+    progress: true,
+    transition: 'slide',
+    plugins: [Notes, Highlight],
+    // Lazy-load media
+    preloadIframes: false,
+  });
+</script>
+
+</body>
+</html>

@@ -10,15 +10,30 @@ if [[ ! -d "$ENGINE" ]]; then
   exit 2
 fi
 
-# 1) Python 3.12 (Ubuntu 24.04 native) 확인
-if ! command -v python3 >/dev/null; then
-  echo "ERR: python3 미설치 — sudo apt install -y python3 python3-venv python3-dev" >&2
-  exit 3
+# 1) Python 3.12 확인 — Ubuntu 24.04 native. Ubuntu 26.04 는 3.14 가 native 라
+#    scikit-learn 1.4 / numpy 1.26 휠 부재 → 명시적으로 python3.12 를 우선 탐색.
+#    (VELXOR_PY 로 override 가능. 미존재 시 python3 fallback + 경고.)
+PY_BIN="${VELXOR_PY:-}"
+if [[ -z "$PY_BIN" ]]; then
+  if command -v python3.12 >/dev/null; then
+    PY_BIN="python3.12"
+  elif command -v python3 >/dev/null; then
+    PY_BIN="python3"
+    PY_VER="$(python3 -c 'import sys;print("{}.{}".format(*sys.version_info[:2]))')"
+    if [[ "$PY_VER" != "3.12" ]]; then
+      echo "WARN: python3 = $PY_VER (3.12 아님). Ubuntu 26.04+ 라면" >&2
+      echo "      'sudo apt install -y python3.12 python3.12-venv python3.12-dev' 후 재실행 권장." >&2
+      echo "      requirements.lock 의 scikit-learn 1.4.2 / numpy 1.26.4 는 3.13+ 휠 미배포." >&2
+    fi
+  else
+    echo "ERR: python3 미설치 — sudo apt install -y python3.12 python3.12-venv python3.12-dev" >&2
+    exit 3
+  fi
 fi
 
 # 2) venv 생성 (이미 있으면 skip)
 if [[ ! -d "$ENGINE/.venv" ]]; then
-  python3 -m venv "$ENGINE/.venv"
+  "$PY_BIN" -m venv "$ENGINE/.venv"
   echo "[setup-venv] created $ENGINE/.venv"
 else
   echo "[setup-venv] $ENGINE/.venv 이미 존재 — skip 생성"

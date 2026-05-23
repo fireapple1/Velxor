@@ -51,6 +51,8 @@ echo "  ✓ Vite dev (5173) 가동 확인"
 if ! command -v Xvfb >/dev/null 2>&1; then
   echo "ERROR: Xvfb 바이너리를 찾을 수 없습니다." >&2
   echo "       sudo apt install -y xvfb xdotool x11-utils" >&2
+  echo "       (Ubuntu 26.04 LTS: GNOME 세션이 Wayland-only 지만 Xvfb 자체는" >&2
+  echo "        legacy X11 서버이므로 xvfb 패키지 설치 후 headless 정상 동작.)" >&2
   exit 1
 fi
 echo "  ✓ Xvfb 바이너리 확인"
