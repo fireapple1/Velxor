@@ -23,11 +23,13 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent
 ROOT = ENGINE_DIR.parent
 sys.path.insert(0, str(ENGINE_DIR))
 
-from features import FEATURE_NAMES, to_vector  # noqa: E402
+from features import FEATURE_NAMES, slice_to_windows, to_vector  # noqa: E402
 
 WINDOW_MS = 1000
+MIN_EVENTS_PER_WINDOW = 4  # 극저활동 window 제외 (Option D)
 
 X, y = [], []
+per_file_counts = []
 
 # positive: v1 + v2 만 (v3 held-out 절대 제외)
 positive_files = sorted(
@@ -35,16 +37,28 @@ positive_files = sorted(
 )
 for path in positive_files:
     events = [json.loads(l) for l in open(path)]
-    X.append(to_vector(events, WINDOW_MS))
-    y.append(1)
+    n_added = 0
+    for window_events in slice_to_windows(events, WINDOW_MS):
+        if len(window_events) < MIN_EVENTS_PER_WINDOW:
+            continue
+        X.append(to_vector(window_events, WINDOW_MS))
+        y.append(1)
+        n_added += 1
+    per_file_counts.append((Path(path).name, "+", n_added))
 
 negative_files = sorted(
     glob.glob(str(ROOT / "datasets" / "negative" / "*.jsonl"))
 )
 for path in negative_files:
     events = [json.loads(l) for l in open(path)]
-    X.append(to_vector(events, WINDOW_MS))
-    y.append(0)
+    n_added = 0
+    for window_events in slice_to_windows(events, WINDOW_MS):
+        if len(window_events) < MIN_EVENTS_PER_WINDOW:
+            continue
+        X.append(to_vector(window_events, WINDOW_MS))
+        y.append(0)
+        n_added += 1
+    per_file_counts.append((Path(path).name, "-", n_added))
 
 if not X:
     sys.exit("ERR: 학습 샘플 없음 — datasets/positive 또는 datasets/negative 가 비어있음")
@@ -53,7 +67,12 @@ X = np.array(X)
 y = np.array(y)
 n_pos = int(y.sum())
 n_neg = len(y) - n_pos
-print(f"학습 샘플: positive(v1+v2)={n_pos}  negative={n_neg}  (총 {len(y)})")
+n_pos_files = sum(1 for _, l, _ in per_file_counts if l == "+")
+n_neg_files = sum(1 for _, l, _ in per_file_counts if l == "-")
+print(f"학습 샘플 (window-sliced @ {WINDOW_MS}ms, min_events={MIN_EVENTS_PER_WINDOW}):")
+print(f"  positive(v1+v2): {n_pos} windows from {n_pos_files} files")
+print(f"  negative       : {n_neg} windows from {n_neg_files} files")
+print(f"  total          : {len(y)} samples")
 print(f"features: {FEATURE_NAMES}")
 print(f"X mean per feature: {np.round(X.mean(axis=0), 2)}")
 print(f"X std  per feature: {np.round(X.std(axis=0), 2)}")

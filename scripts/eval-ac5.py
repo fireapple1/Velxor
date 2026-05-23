@@ -23,9 +23,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "python-engine"))
 
-from features import FEATURE_NAMES, to_vector  # noqa: E402
+from features import FEATURE_NAMES, slice_to_windows, to_vector  # noqa: E402
 
 WINDOW_MS = 1000
+MIN_EVENTS_PER_WINDOW = 4  # train.py 와 동일 — 극저활동 window 제외
 DECISION_THRESHOLD = 0.5  # 사후 조정 금지 (AC5 정책)
 MODEL_PATH = ROOT / "python-engine" / "model" / "model.pkl"
 
@@ -34,12 +35,25 @@ with open(MODEL_PATH, "rb") as f:
 
 
 def predict(path: Path):
+    """파일 내 모든 1s window 분류 → max proba 가 ≥ threshold 면 ransomware.
+
+    Option D (AC5-results v3 §2.2): 실 운영 streaming 시 fanotify 가
+    1초 단위로 batch 를 보내고, 한 batch 라도 ransomware-class 면 차단.
+    동일 semantics 를 평가에서 적용."""
     with open(path) as fp:
         events = [json.loads(line) for line in fp if line.strip()]
-    vec = to_vector(events, WINDOW_MS)
-    proba = float(model.predict_proba([vec])[0][1])  # [1] = ransomware
-    verdict = "ransomware" if proba >= DECISION_THRESHOLD else "benign"
-    return verdict, proba, vec, len(events)
+    windows = slice_to_windows(events, WINDOW_MS)
+    eligible = [w for w in windows if len(w) >= MIN_EVENTS_PER_WINDOW]
+    if not eligible:
+        # 극저활동 file — benign 기본값
+        return "benign", 0.0, len(events), 0
+    probas = [
+        float(model.predict_proba([to_vector(w, WINDOW_MS)])[0][1])
+        for w in eligible
+    ]
+    max_proba = max(probas)
+    verdict = "ransomware" if max_proba >= DECISION_THRESHOLD else "benign"
+    return verdict, max_proba, len(events), len(eligible)
 
 
 def main():
@@ -55,31 +69,35 @@ def main():
     rows = []
 
     print("=== Held-out v3 (expect ransomware) ===")
-    print(f"{'file':<35} {'verdict':<11} {'proba':<8} {'n_events':<10} label")
+    print(f"{'file':<35} {'verdict':<11} {'max_proba':<10} "
+          f"{'n_events':<9} {'n_win':<6} label")
     for path in heldout:
-        verdict, proba, _, n = predict(path)
+        verdict, proba, n_ev, n_win = predict(path)
         if verdict == "ransomware":
             tp += 1
             label = "TP"
         else:
             fn += 1
             label = "FN"
-        rows.append((path.name, "v3", verdict, proba, n, label))
-        print(f"  {path.name:<33} {verdict:<11} {proba:.3f}    {n:<10} [{label}]")
+        rows.append((path.name, "v3", verdict, proba, n_ev, label))
+        print(f"  {path.name:<33} {verdict:<11} {proba:.3f}      "
+              f"{n_ev:<9} {n_win:<6} [{label}]")
 
     print()
     print("=== Negative (expect benign) ===")
-    print(f"{'file':<35} {'verdict':<11} {'proba':<8} {'n_events':<10} label")
+    print(f"{'file':<35} {'verdict':<11} {'max_proba':<10} "
+          f"{'n_events':<9} {'n_win':<6} label")
     for path in negative:
-        verdict, proba, _, n = predict(path)
+        verdict, proba, n_ev, n_win = predict(path)
         if verdict == "ransomware":
             fp += 1
             label = "FP"
         else:
             tn += 1
             label = "TN"
-        rows.append((path.name, "negative", verdict, proba, n, label))
-        print(f"  {path.name:<33} {verdict:<11} {proba:.3f}    {n:<10} [{label}]")
+        rows.append((path.name, "negative", verdict, proba, n_ev, label))
+        print(f"  {path.name:<33} {verdict:<11} {proba:.3f}      "
+              f"{n_ev:<9} {n_win:<6} [{label}]")
 
     n_pos = tp + fn
     n_neg = fp + tn

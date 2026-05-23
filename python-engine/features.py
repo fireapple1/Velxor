@@ -51,6 +51,27 @@ def to_vector(events, window_ms):
     return [feats[name] for name in FEATURE_NAMES]
 
 
+def slice_to_windows(events, window_ms):
+    """events 를 ts_unix_ms 기준 [window_ms] bucket 으로 분할.
+
+    train/eval 전용 — live app.py 는 rust-service 가 이미 슬라이싱한 batch 를 받음.
+    Option D (AC5-results v3 §2.2): JSONL 단일 sample 대신 시간 윈도우 단위로
+    feature 추출 → ts spread 다양화 효과 학습.
+
+    빈 입력 → []. window_ms ≤ 0 → 전체를 단일 window 로 묶음 (legacy 호환)."""
+    if not events:
+        return []
+    if window_ms <= 0:
+        return [list(events)]
+    sorted_events = sorted(events, key=lambda e: e.get("ts_unix_ms", 0))
+    t0 = sorted_events[0].get("ts_unix_ms", 0)
+    buckets = {}
+    for e in sorted_events:
+        idx = (e.get("ts_unix_ms", t0) - t0) // window_ms
+        buckets.setdefault(idx, []).append(e)
+    return [buckets[k] for k in sorted(buckets.keys())]
+
+
 def _ext(p):
     if not p:
         return None

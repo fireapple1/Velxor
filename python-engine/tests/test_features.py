@@ -12,7 +12,7 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ENGINE_DIR))
 REPO_ROOT = ENGINE_DIR.parent
 
-from features import FEATURE_NAMES, extract, to_vector  # noqa: E402
+from features import FEATURE_NAMES, extract, slice_to_windows, to_vector  # noqa: E402
 
 
 def test_empty_events_returns_zero_vector():
@@ -99,6 +99,50 @@ def test_mixed_rename_and_write_rates():
     v = extract(events, 1000)
     assert v["rename_rate"] == 30.0
     assert v["write_rate"] == 60.0
+
+
+# slice_to_windows — Option D (AC5-results v3 §2.2)
+
+def test_slice_empty():
+    assert slice_to_windows([], 1000) == []
+
+
+def test_slice_single_window_keeps_all():
+    events = [{"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 100 + i * 50}
+              for i in range(5)]
+    out = slice_to_windows(events, 1000)
+    assert len(out) == 1 and len(out[0]) == 5
+
+
+def test_slice_two_windows_split_at_1s():
+    events = [
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 0},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 500},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 1500},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 1800},
+    ]
+    out = slice_to_windows(events, 1000)
+    assert len(out) == 2
+    assert len(out[0]) == 2 and len(out[1]) == 2
+
+
+def test_slice_handles_unsorted_input():
+    """입력이 ts 정렬돼 있지 않아도 결과는 ts 기준으로 분할."""
+    events = [
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 1800},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 0},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 1500},
+        {"event_type": "FileWrite", "pid": 1, "ts_unix_ms": 500},
+    ]
+    out = slice_to_windows(events, 1000)
+    assert len(out) == 2 and len(out[0]) + len(out[1]) == 4
+
+
+def test_slice_window_ms_zero_returns_single_window():
+    events = [{"event_type": "FileWrite", "pid": 1, "ts_unix_ms": i * 5000}
+              for i in range(3)]
+    out = slice_to_windows(events, 0)
+    assert len(out) == 1 and len(out[0]) == 3
 
 
 # 통합 — 실 데이터셋

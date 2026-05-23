@@ -33,42 +33,72 @@
 - **model_version**: `lr-2026w7`
 - **알고리즘**: `sklearn.linear_model.LogisticRegression(max_iter=1000, class_weight="balanced")`
 - **artifact**: `python-engine/model/model.pkl`
-- **학습 입력 (2026-05-23 v2 보강)**:
-  - positive: `datasets/positive/v1_run_{01..30}.jsonl` + `v2_run_{01..30}.jsonl` (총 60)
-  - negative: `datasets/negative/*.jsonl` (총 10 — rsync × 4, unzip × 4, gitclone × 1, npm × 1)
-  - imbalance: 6:1 → `class_weight="balanced"` 보정 (이전 2:1 에서 negative 보강은 future work)
-- **held-out (v2 보강)**: `datasets/heldout/v3/v3_run_{01..30}.jsonl` (학습 절대 미포함)
-- **randomization (simulate v1/v2/v3)**:
-  - count: base ± 20% jitter (v1 240~360, v2 400~600, v3 160~240)
-  - 파일 사이즈: 512B ~ 256KiB (이전 64KiB 에서 4× 확장)
-  - 파일명 풀: `{doc,report,note,file,data,memo,draft,letter}_NNNN`
-  - dst extension 풀: variant 별 5종 random (`.docx.enc` / `.encrypted` / `.crypt` 등)
-  - write pattern 4종 random: `prefix(32B)` / `prefix+suffix(64B)` / `multi_chunk(3-5×16-64B)` / `full_overwrite`
-  - op 순서 shuffle (sequential bias 제거)
-  - seed = run_idx (재현 가능 + run 간 분포 다름)
+- **학습 입력 (2026-05-23 v3 보강 — Option D)**:
+  - positive: `datasets/positive/v1_run_{01..30}.jsonl` + `v2_run_{01..30}.jsonl` (60 파일 → **60 windows**)
+  - negative: `datasets/negative/*.jsonl` (37 파일 → **337 windows**)
+    - baseline 10 (rsync × 4, unzip × 4, gitclone × 1, npm × 1)
+    - **신규 spread variants 27**: rsync × 4 × 3 spreads (1/5/30s) + unzip × 4 × 3 + npm × 3
+    - gitclone variants 미생성 — `git_express/` 디렉토리에 npm install 이후 `node_modules` 적재되어 baseline 과 분리 불가 (gitclone-only 결과 보존 안 됨). npm variants 만 진행.
+  - imbalance: 60 positive : 337 negative (~1:5.6) → `class_weight="balanced"` 자동 보정
+- **held-out (v3 미보강 — v2 와 동일)**: `datasets/heldout/v3/v3_run_{01..30}.jsonl` (학습 절대 미포함)
 
-### 2.1 학습 후 feature coefficient (honest reporting)
+### 2.2 window-sliced features (Option D 핵심)
 
-`python-engine/model/train.py` stdout (v2 보강 후):
+**v3 변경의 본질**: 이전 v2 까지 한 JSONL = 한 feature vector (window_ms=1000 고정 → write_rate=count/1.0s). ts spread 무관. Option D 의 spread 변형이 의미 있으려면 train/eval 도 ts 기반 슬라이싱 필요.
+
+- `python-engine/features.py::slice_to_windows(events, window_ms)` 신규 — ts_unix_ms 기준 bucket 분할
+- `python-engine/model/train.py`: 각 JSONL → 1s window 단위 분할, 각 window = 1 sample (min_events=4 이하 window 제외)
+- `scripts/eval-ac5.py`: 각 file 의 max(window_proba) ≥ threshold → ransomware (실 운영 fanotify streaming semantics 와 일치)
+- **live engine (app.py) 무변** — rust-service 가 이미 1s batch 로 보내므로 그대로
+
+이 변경으로:
+- positive simulate (ts spread ~5ms, all events in same window): 60 file × 1 window = 60 sample (변화 없음)
+- negative baseline (ts spread 60ms~2.3s): 10 file × {1,2,3} window
+- negative spread variants: 27 file × {1,5,30} window = 풍부한 sample
+  - 예: rsync_1000_s5s = 5 window × ~200 events each → write_rate 200/s ← positive v3 (~200/s) 와 겹침
+  - 예: npm_install_express_s30s = 30 window × ~219 events → write_rate 219/s ← positive v3 와 겹침
+- 결과: write_rate 단독으론 분리 불가능해짐 → 모델이 다른 feature 활용 강제
+
+### 2.3 simulate randomization (v2 와 동일 유지)
+
+- count: base ± 20% jitter (v1 240~360, v2 400~600, v3 160~240)
+- 파일 사이즈: 512B ~ 256KiB
+- 파일명 풀 + dst extension 풀 + write pattern 4종 + op shuffle + --seed (자세한 사항 v2 §2)
+
+### 2.4 학습 후 feature coefficient (honest reporting)
+
+`python-engine/model/train.py` stdout (v3 보강 후):
 
 ```
-학습 샘플: positive(v1+v2)=60  negative=10  (총 70)
+학습 샘플 (window-sliced @ 1000ms, min_events=4):
+  positive(v1+v2): 60 windows from 60 files
+  negative       : 337 windows from 37 files
+  total          : 397 samples
+
 classes_: [0 1]  (== [0=benign, 1=ransomware])
 
 feature coefficients:
-  write_rate         coef = -0.025672
-  rename_rate        coef = -0.025672
-  ext_diversity      coef = -0.000206
-  size_mean          coef = +0.000569
-  size_std           coef = -0.000365
-  pid_fanout         coef = -0.000185
-  intercept                 -0.0002
+  write_rate         coef = -0.003128
+  rename_rate        coef = -0.003128
+  ext_diversity      coef = +0.006643
+  size_mean          coef = +0.000604
+  size_std           coef = -0.000410
+  pid_fanout         coef = -0.006090
+  intercept = -15.0810
 
 train accuracy: 1.0000
 ```
 
-- `write_rate` / `rename_rate` 음수 coef 부호는 v2 보강 후에도 **변하지 않음** — 본 데이터셋의 *분포 자체* 가 negative bursty 워크로드(npm install 6500 writes/s, rsync 2000 = 2000 writes/s) 를 단일 1초 window 로 정규화하기 때문 (§4.1).
-- LR 의 절대 coef 가 매우 작고 (~0.025) intercept 도 거의 0 인데도 perfect separation 이 나는 이유: positive (write_rate ≤ 500) ↔ negative (write_rate ≥ 600) 사이 작은 마진만으로도 logit 이 충분히 큼.
+**v3 ↔ v2 비교**:
+| feature | v2 coef | v3 coef | 의미 변화 |
+|---|---|---|---|
+| write_rate | -0.025672 | -0.003128 | **결정 영향 1/8 로 감소** — slicing 으로 negative rate 분포가 positive 영역 (200~600/s) 까지 확장됨 |
+| ext_diversity | -0.000206 | **+0.006643** | **부호 반전** — positive(2) > rsync/unzip(1), npm(많음) 의 중간 영역에서 양의 가중 |
+| size_mean | +0.000569 | +0.000604 | 거의 동일 — positive(~130KB random) ↔ negative(8B/80B dummy) 직교성 유지 |
+| pid_fanout | -0.000185 | -0.006090 | 영향 약간 증가 |
+| intercept | -0.0002 | -15.081 | 기본 logit 이 강하게 benign 쪽으로 이동 — 다수 negative window 학습 결과 |
+
+→ **결론**: window slicing 이 의도대로 작동. write_rate 가 지배 피처에서 보조 피처로 내려옴. 대신 `ext_diversity` (positive 가 일관적으로 2 개) 와 `size_mean` (positive random 130KB ↔ negative tiny dummy) 가 주 결정자.
 
 ---
 
@@ -89,16 +119,16 @@ v3_run_15.jsonl  ransomware  1.000  372  [TP]
 v3_run_30.jsonl  ransomware  1.000  458  [TP]
 ```
 
-### 3.2 Negative (expect benign) — 10 runs (v2 미보강)
+### 3.2 Negative (expect benign) — 37 files (v3 spread variants 포함)
 
-| file | verdict | proba | n_events | label |
-|---|---|---|---|---|
-| gitclone_express_run_01.jsonl | benign | 0.000 | 484 | TN |
-| npm_install_express_run_01.jsonl | benign | 0.000 | 13128 | TN |
-| rsync_{300,500,1000,2000}_run_01.jsonl | benign | 0.000 | 600~4000 | TN × 4 |
-| unzip_{200,500,1000,2000}_run_01.jsonl | benign | 0.000 | 400~4000 | TN × 4 |
+| 파일 분류 | count | verdict | max_proba | n_events | n_win | label |
+|---|---|---|---|---|---|---|
+| baseline _run_01 | 10 | benign | 0.000 | 400 ~ 13128 | 1 ~ 3 | TN × 10 |
+| rsync spread variants (1/5/30s) | 12 | benign | 0.000 | 600 ~ 4000 | 1 ~ 30 | TN × 12 |
+| unzip spread variants (1/5/30s) | 12 | benign | 0.000 | 400 ~ 4000 | 1 ~ 30 | TN × 12 |
+| npm_install spread variants | 3 | benign | 0.000 | 13128 | 1 ~ 30 | TN × 3 |
 
-negative 데이터셋 보강은 별도 future work (§4.4) — 외부 워크로드 (rsync/npm) 재실행 + 변형 시드 필요.
+전체 37 file 모두 모든 window 의 proba=0.000 → max_proba=0.000.
 
 ### 3.3 합산 + 판정
 
@@ -106,27 +136,25 @@ negative 데이터셋 보강은 별도 future work (§4.4) — 외부 워크로�
 |---|---|---|---|
 | TP / positive | **30 / 30** | ≥ 9 / 10 (3× 초과) | PASS |
 | FN / positive | 0 / 30 | — | — |
-| FP / negative | **0 / 10** | ≤ 1 / 10 | PASS |
-| TN / negative | 10 / 10 | — | — |
+| FP / negative | **0 / 37** | ≤ 1 / 10 (≈ ≤ 3.7 / 37) | PASS |
+| TN / negative | 37 / 37 | — | — |
 | **AC5 overall** | — | — | **PASS** |
 
-proba 분포가 1.000 / 0.000 양극단인 점은 v2 simulate randomization 보강 후에도 **변하지 않음** — 학습 분포 자체 한계 (§4.1). 사후 보정 / 임계값 조정 없이 0.5 threshold 그대로 적용.
+→ **proba 분포는 v3 보강 (window slicing + spread variants) 후에도 1.000 / 0.000 양극단 유지**. 단, 양극단의 *원인* 이 v2 와 다름 — write_rate 직접 분리에서 size_mean / ext_diversity 직교성으로 이동 (§4.5).
 
 ---
 
 ## 4. 한계 및 honest interpretation
 
-### 4.1 학습 데이터 분포의 비현실성 (가장 큰 한계)
+### 4.1 학습 데이터 분포의 비현실성 (v3 일부 해소)
 
-`scripts/gen-negative.py` 가 합성한 negative 워크로드는 각 워크로드의 결과 디렉토리를 walk 한 후 events 를 **모두 단일 1초 window 안에 발생한 것으로** 합성한다 (`features.py` 의 `window_ms = 1000` 정규화). 그 결과:
+이전 v2 까지: gen-negative 가 워크로드 events 를 단일 1초 window 로 정규화 → npm 13128/s, rsync 2000/s 같은 비현실적 분포 → write_rate 단독으로 perfect separation.
 
-- npm install (express) → 13,128 events / 1초 → `write_rate ≈ 6500/s`
-- rsync 2000 → 4,000 events / 1초 → `write_rate ≈ 2000/s`
-- v3 ransomware → 400 events / 1초 → `write_rate ≈ 200/s`
+**v3 변경**: `--spreads 1,5,30` 으로 동일 워크로드를 1/5/30초로 펼친 ts 변형 생성 + train/eval 에서 `slice_to_windows` 로 1s bucket 분할. npm 30s spread = 219 events/s, rsync_1000 5s spread = 200 events/s 같이 positive (200~600/s) 와 겹치는 negative window 가 등장. 모델이 write_rate 만으론 못 풀게 됨.
 
-실제 운영 환경에서 npm install 이 1초 안에 13,000 writes 를 만들지는 않는다. 1초 sliding window 안에서는 negative 의 평균 rate 가 ransomware 보다 *낮을 가능성*이 크다. 즉 **LR 의 음수 coef 는 본 데이터셋의 합성 분포에 specific 하며, 실 운영 collector trace 와 분포가 다르면 즉시 깨질 수 있다**.
+남은 한계: simulate positive 도 ts spread 5~100ms 로 사실상 단일 window 에 압축됨. positive 의 *내적* 시간 분포는 여전히 비현실적 (실 ransomware 는 파일당 수십 ms ~ 수백 ms 소요). 진짜 1:1 비교는 fanotify 실 trace 캡처 필요.
 
-→ **future work**: A 의 실 fanotify collector 가 동일 워크로드를 1초 sliding window 로 캡처한 trace 로 재학습. AC5-results-v2 발행 시 비교.
+→ **future work**: simulate 에 per-op sleep 추가 or gen-positive 에서 합성 ts spread 적용. A 의 실 fanotify trace 로 동일 시나리오 재캡처.
 
 ### 4.2 합성 PoC 일반화 의문 (AC5c disclaimer 동일)
 
@@ -140,38 +168,51 @@ v1/v2/v3 simulator 모두 [`open`, `truncate`, `write`, `rename`] 패턴만 emit
 
 → **future work**: A 의 FileRename emit 활성화 후 재학습.
 
-### 4.4 데이터셋 크기 (v2 보강 후 갱신)
+### 4.4 데이터셋 크기 (v3 보강 후 갱신)
 
-| 분류 | v1 (초기) | v2 (2026-05-23 보강) | 변화 |
-|---|---|---|---|
-| positive 학습 | 20 (v1 10 + v2 10) | **60** (v1 30 + v2 30) | 3× |
-| negative 학습 | 10 | 10 (미보강) | — |
-| held-out v3 | 10 | **30** | 3× |
-| **총** | 40 | **100** | 2.5× |
+| 분류 | v1 (초기) | v2 (보강) | v3 (Option D) | 변화 |
+|---|---|---|---|---|
+| positive 학습 file | 20 | 60 | 60 | v2 = v3 |
+| positive 학습 **window** | 20 | 60 | 60 | v2 = v3 (ts spread 5ms 라 슬라이싱돼도 1 window/file) |
+| negative 학습 file | 10 | 10 | **37** | 3.7× |
+| negative 학습 **window** | 10 | 10 | **337** | 33.7× |
+| held-out v3 | 10 | 30 | 30 | v2 = v3 |
+| **총 학습 sample** | 30 | 70 | **397** | 13× over v1 |
 
-simulate randomization (count jitter, 파일명/extension 풀, write pattern 4종, op shuffle) 적용 후 매 run 별 distribution 달라짐. 단:
-- **negative 미보강** — 외부 워크로드 (rsync/npm) 재실행 필요. class imbalance 6:1 → `class_weight=balanced` 보정.
-- **cross-validation 미실시** — 시간 제약. stratified k-fold 는 future work.
+- **negative file 보강**: 외부 네트워크 워크로드 재실행 회피 정책에 따라 캐시된 `~/velxor-work/*` 디렉토리 재사용 (`--reuse` 플래그). spread 변형 1/5/30s × 워크로드 8종 (gitclone variants 제외 — §2 참고).
+- **negative window 33× 증가**: 1s window slicing 으로 30s-spread 1 file → 30 window 가 됨. 다수 저활동 window 가 학습 데이터에 포함.
+- **cross-validation 미실시** — stratified k-fold + RandomForest/IsolationForest 비교는 future work (시간 제약).
 
-→ **future work**: negative 30+ runs (rsync 변형 시드, npm install 재실행), 5-fold CV, RandomForest / IsolationForest 비교.
+### 4.5 v3 후에도 proba=1.000/0.000 양극단 — 진짜 원인 (갱신)
 
-### 4.5 randomization 후에도 proba=1.000/0.000 양극단 — 진짜 원인
+v3 보강 (slicing + spread variants) 후에도 양극단 유지. 단 **원인이 v2 와 다름**:
 
-v2 보강 (simulate jitter) 후에도 proba 분포 동일 — 모델이 *학습 데이터 양* 의 한계 (overfit) 가 아니라 **합성 distribution 자체** 가 두 클래스를 거의 분리하기 때문. 정확한 분리 지점:
+**v2 의 원인 (해소됨)**: write_rate 직선 분리. positive 240~600/s, negative 300~6500/s — 부분 겹쳤지만 npm/rsync2000 꼬리가 평균을 끌어올려 threshold 학습.
 
-| 데이터셋 | write_rate (1초 window 정규화) |
-|---|---|
-| positive v1 (count 240~360) | ~240 ~ 360 /s |
-| positive v2 (count 400~600) | ~400 ~ 600 /s |
-| positive v3 held-out (count 160~240) | ~160 ~ 240 /s |
-| negative rsync_300 | ~300 /s |
-| negative rsync_500 | ~500 /s |
-| negative rsync_1000+ | ~1000 ~ 2000 /s |
-| negative npm_install | ~6500 /s |
+**v3 의 원인 (새로 식별)**: 두 class 의 **`size_mean` 직교성**.
 
-positive 와 negative 가 write_rate 축에서 부분 겹치지만 (rsync_500 ≈ v2_run) gen-negative 의 npm/rsync 2000 가 분포 꼬리를 끌어올려 평균이 다름 → 모델이 단순 threshold 학습.
+| 데이터셋 | per-event `file_size` | window `size_mean` |
+|---|---|---|
+| positive v1/v2/v3 | random 512B ~ 256KiB | ~130,000 (130KB) |
+| negative rsync | `f"dummy-{i}\n"` (8 bytes) | ~8 |
+| negative unzip | `f"payload-{i}\n" * 8` (~80 bytes) | ~80 |
+| negative gitclone | 실 git blob (다양, 1B ~ MBs) | ~1000~10000 |
+| negative npm | 실 node_modules (다양) | ~500~5000 |
 
-→ **future work**: gen-negative window 분포 다양화 (실 trace 의 burst 크기 모사), 또는 실 fanotify collector 로 동일 워크로드 재캡처.
+LR coef: `size_mean = +0.000604`, `intercept = -15.08`.
+- positive window logit ≈ 0.000604 × 130000 - 15.08 ≈ **+63.4** → proba ≈ 1.000
+- rsync window logit ≈ 0.000604 × 8 - 15.08 ≈ **-15.07** → proba ≈ 0.000
+- npm window logit ≈ 0.000604 × 3000 - 15.08 ≈ **-13.3** → proba ≈ 0.000
+
+**즉 `size_mean` 한 피처만으로 perfect separation 가능**. window slicing 으로 write_rate 가 무력화돼도 size_mean 직교성은 그대로.
+
+**근본 원인**: 합성 데이터셋의 size 분포가 비현실적. 실 환경 ransomware 는 victim 의 다양한 파일 (text, image, binary) 을 암호화 → size 분포는 원본 파일과 동일. 실 환경 benign 워크로드 (백업, 코드 작업) 도 같은 size 분포. PoC 합성에서 positive 만 random 64KB+ 로 채워서 분리됨.
+
+→ **future work**:
+1. positive simulator 에 다양한 size 분포 도입 (작은 파일도 포함, 8B ~ 100MB 로그 분포)
+2. negative 워크로드를 victim filesystem (사진/문서/코드) 의 실 backup workload 로 재캡처
+3. entropy 피처 추가 (positive=random=high, negative dummy=low, real-file=mid) — 단 schema v1.x 의 op_detail 확장 필요
+4. RandomForest 로 비선형 결정 경계 학습 (현재 LR 은 size_mean 한 축으로만 분리)
 
 ---
 
@@ -197,3 +238,4 @@ bash scripts/eval-ac5.sh
 |---|---|---|---|
 | v1 | 2026-05-23 | 최초 측정 + AC5 PASS (10/10 TP, 0/10 FP) + honest limitations | C |
 | v2 | 2026-05-23 | simulate v1/v2/v3 randomization 보강 (count jitter, 파일명/extension 풀, write pattern 4종, op shuffle). 데이터셋 학습 20→60 + held-out 10→30. **재평가 PASS (30/30 TP, 0/10 FP)** + §4.4/4.5 갱신 — proba 분포 한계는 합성 분포 본질이라 명시 | C |
+| v3 | 2026-05-23 | **Option D**: gen-negative `--spreads 1,5,30 --reuse` + features.py `slice_to_windows` + train/eval per-window. negative window 10→337 (33×). **재평가 PASS (30/30 TP, 0/37 FP)** + §2.2 슬라이싱 설계 + §4.5 갱신 — 양극단 proba 원인이 `write_rate` 에서 `size_mean` 직교성으로 이동 식별 (합성 file size 분포 한계). app.py / live engine 무변. | C |

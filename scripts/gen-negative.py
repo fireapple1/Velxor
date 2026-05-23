@@ -19,6 +19,7 @@ Usage (repo root, venv 활성화 후, 인터넷 필요):
 import argparse
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -50,9 +51,12 @@ def prep_zip_archive(zip_path: Path, n: int):
             zf.writestr(f"entry_{i:04d}.dat", f"payload-{i}\n" * 8)
 
 
-def scan_to_events(dst_dir: Path, t_start_ms: int, elapsed_ms: float) -> list[dict]:
+def scan_to_events(dst_dir: Path, t_start_ms: int, spread_ms: float) -> list[dict]:
     """결과 디렉토리 walk → 파일별 FileRename + FileWrite dual emit (positive 일관).
-    ts 는 워크로드 측정 시작점 + (i/n) × elapsed 로 균등 분배 — mtime 폭주 회피."""
+    ts 는 t_start + (i/n) × spread_ms 로 균등 분배 — mtime 폭주 회피.
+
+    spread_ms: 합성 분포 폭. 실측 워크로드 elapsed 가 아닌 인위적 값 권장
+    (write_rate 분포 다양화 — Option D, AC5-results v3 §4.5)."""
     pid = os.getpid()
     parent_pid = os.getppid()
     image_path = sys.executable
@@ -70,7 +74,7 @@ def scan_to_events(dst_dir: Path, t_start_ms: int, elapsed_ms: float) -> list[di
             st = p.stat()
         except FileNotFoundError:
             continue
-        ts = t_start_ms + int((i / n) * elapsed_ms)
+        ts = t_start_ms + int((i / n) * spread_ms)
         seq += 1
         events.append({
             "schema_version": "1.0",
@@ -168,11 +172,46 @@ WORKLOADS = [
         lambda: run_npm_install("express")),
 ]
 
+# --reuse 모드: 워크로드 재실행 없이 캐시 dst 만 사용 (네트워크/시간 절약).
+# 외부 네트워크 워크로드 (git_clone, npm_install) 는 절대 재실행 금지 정책.
+LABEL_TO_DST = {
+    "rsync_300":           WORK_ROOT / "rsync_dst_300",
+    "rsync_500":           WORK_ROOT / "rsync_dst_500",
+    "rsync_1000":          WORK_ROOT / "rsync_dst_1000",
+    "rsync_2000":          WORK_ROOT / "rsync_dst_2000",
+    "unzip_200":           WORK_ROOT / "unzip_dst_200",
+    "unzip_500":           WORK_ROOT / "unzip_dst_500",
+    "unzip_1000":          WORK_ROOT / "unzip_dst_1000",
+    "unzip_2000":          WORK_ROOT / "unzip_dst_2000",
+    "gitclone_express":    WORK_ROOT / "git_express",
+    "npm_install_express": WORK_ROOT / "git_express" / "node_modules",
+}
+
+
+def parse_spreads(spec: str) -> list[float]:
+    """'1,5,30' → [1.0, 5.0, 30.0]"""
+    out = [float(s.strip()) for s in spec.split(",") if s.strip()]
+    if not out:
+        raise ValueError("spread pool empty")
+    return out
+
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--workload", default="all",
                    help="라벨 또는 'all' (10종)")
+    p.add_argument("--spreads", default="",
+                   help="ts spread pool in seconds, comma-sep. "
+                        "예: '1,5,30'. 미지정 시 실측 elapsed 사용 (legacy 호환).")
+    p.add_argument("--runs", type=int, default=1,
+                   help="workload × spread 별 run 수 (default 1)")
+    p.add_argument("--seed", type=int, default=None,
+                   help="결정적 실행 (run_idx 시드와 결합)")
+    p.add_argument("--out-suffix", default="",
+                   help="파일명 접미사 — augment 모드에서 기존 *_run_01 덮어쓰기 방지")
+    p.add_argument("--reuse", action="store_true",
+                   help="워크로드 재실행 없이 LABEL_TO_DST 캐시만 사용 — "
+                        "git/npm 같은 외부 네트워크 회피 (Option D augment 모드)")
     args = p.parse_args()
 
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
@@ -185,27 +224,60 @@ def main():
         print(f"unknown workload: {args.workload}", file=sys.stderr)
         sys.exit(2)
 
+    spread_pool = parse_spreads(args.spreads) if args.spreads else []
+
     successes, skips = [], []
     for label, fn in selected:
-        try:
+        if args.reuse:
+            dst = LABEL_TO_DST.get(label)
+            if dst is None or not dst.exists():
+                skips.append((label, "reuse: dst cache missing"))
+                print(f"  {label}: SKIP (reuse: {dst} missing)", file=sys.stderr)
+                continue
+            measured_elapsed_ms = 0.0
+        else:
+            try:
+                t0 = time.perf_counter()
+                dst = fn()
+                measured_elapsed_ms = (time.perf_counter() - t0) * 1000
+            except (subprocess.CalledProcessError, FileNotFoundError,
+                    subprocess.TimeoutExpired) as e:
+                skips.append((label, f"{type(e).__name__}"))
+                print(f"  {label}: SKIP ({type(e).__name__})", file=sys.stderr)
+                continue
+
+        if spread_pool:
+            # spread × runs grid — same dst 디렉토리, 다른 ts 분포
+            for spread_s in spread_pool:
+                spread_ms = spread_s * 1000.0
+                for run_idx in range(1, args.runs + 1):
+                    if args.seed is not None:
+                        random.seed(args.seed + run_idx)
+                    t_start_ms = int(time.time() * 1000) + run_idx
+                    events = scan_to_events(dst, t_start_ms, spread_ms)
+                    if not events:
+                        skips.append((f"{label}_s{spread_s:g}_run_{run_idx:02d}",
+                                      "0 events"))
+                        continue
+                    fname = (f"{label}_s{spread_s:g}s_run_{run_idx:02d}"
+                             f"{args.out_suffix}.jsonl")
+                    out = NEGATIVE_DIR / fname
+                    write_jsonl(events, out)
+                    successes.append((label, spread_s, run_idx, len(events)))
+                    print(f"  {label} spread={spread_s}s run={run_idx}: "
+                          f"{len(events)} events → {out.relative_to(REPO_ROOT)}")
+        else:
+            # legacy: 실측 elapsed 한 번
             t_start_ms = int(time.time() * 1000)
-            t0 = time.perf_counter()
-            dst = fn()
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            events = scan_to_events(dst, t_start_ms, elapsed_ms)
+            events = scan_to_events(dst, t_start_ms, measured_elapsed_ms)
             if not events:
                 skips.append((label, "0 events scanned"))
-                print(f"  {label}: SKIP (0 events)", file=sys.stderr)
                 continue
-            out = NEGATIVE_DIR / f"{label}_run_01.jsonl"
+            out = NEGATIVE_DIR / f"{label}_run_01{args.out_suffix}.jsonl"
             write_jsonl(events, out)
-            successes.append((label, len(events), elapsed_ms))
-            print(f"  {label}: {len(events)} events in {elapsed_ms:.0f} ms "
+            successes.append((label, None, 1, len(events)))
+            print(f"  {label}: {len(events)} events in {measured_elapsed_ms:.0f} ms "
                   f"→ {out.relative_to(REPO_ROOT)}")
-        except (subprocess.CalledProcessError, FileNotFoundError,
-                subprocess.TimeoutExpired) as e:
-            skips.append((label, f"{type(e).__name__}"))
-            print(f"  {label}: SKIP ({type(e).__name__})", file=sys.stderr)
 
     print()
     print(f"=== generated {len(successes)} negative JSONL files "
