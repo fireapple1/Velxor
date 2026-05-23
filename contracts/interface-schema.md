@@ -305,7 +305,7 @@ UI(B)의 끊김·재접속 시 5초 이내 손실 메시지 복원 보장.
 | 버전 | 날짜 | 변경 | 발행자 |
 |---|---|---|---|
 | v1.0-draft | 2026-W1 | 최초 발행 (이 문서) | A |
-| **v1.1** | **2026-05-22** | B/C async review 통합 — C 4건(`contracts/c-review-notes.md`) + A 자체 4건, additive only. B 회신은 사용자 위임으로 비-제출 | A |
+| **v1.1** | **2026-05-22** | B/C async review 통합 — C 4건(`docs/history/c-review-notes.md`) + A 자체 4건, additive only. B 회신은 사용자 위임으로 비-제출 | A |
 
 ---
 

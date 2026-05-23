@@ -42,7 +42,7 @@ Linux(Ubuntu) 사용자공간에서 **랜섬웨어 류 파일 암호화 행위�
 
 VM에서 합성 PoC 실행 → 좌측 프로세스 트리 노드가 빨갛게 깜빡 + 우측 패널에 "Process X가 0.8초 동안 파일 500개 쓰기 중! AI 판정: 랜섬웨어 91%" + 자동/수동 차단. 30초~1분 분량. (PoC v2 baseline: .txt → .crypted, 500 files/0.8s)
 
-> **시연 모드 disclaimer**: `docs/demo/ac3-demo.mp4` 녹화 시 `VELXOR_STUB=engine` 모드를 사용했다. 이 모드는 Python `app.py` 가 모든 batch 를 `ransomware 0.95` 로 하드코드 응답해 UI/차단 파이프라인의 영속성만 시각화한다. Rust 수집기·서비스·차단 로직은 실제로 동작하지만 ML 분류기는 우회된다. 학습된 LR 모델 (`lr-2026w7`) 의 실제 분리 능력은 합성 PoC 한정으로 `AC5 PASS` (held-out 30/30 TP, 0/37 FP) — 자세한 한계는 [`docs/AC5-results.md`](./docs/AC5-results.md) §4.5 참조.
+> **시연 모드 disclaimer**: `docs/demo/ac3-demo.mp4` 녹화 시 `VELXOR_STUB=engine` 모드를 사용했다. 이 모드는 Python `app.py` 가 모든 batch 를 `ransomware 0.95` 로 하드코드 응답해 UI/차단 파이프라인의 영속성만 시각화한다. Rust 수집기·서비스·차단 로직은 실제로 동작하지만 ML 분류기는 우회된다. 학습된 LR 모델 (`lr-2026w7`) 의 실제 분리 능력은 합성 PoC 한정으로 `AC5 PASS` (held-out 30/30 TP, 0/40 FP) — 자세한 한계는 [`docs/AC5-results.md`](./docs/AC5-results.md) §4.5 참조.
 
 ## Status
 
@@ -66,4 +66,5 @@ VM에서 합성 PoC 실행 → 좌측 프로세스 트리 노드가 빨갛게 �
 
 - 평가는 합성 PoC 기준이며 실제 랜섬웨어 일반화는 future work.
 - 학교/공모전 발표용 demo-grade; 운영 배포·시그너처 DB·자동 업데이트 등 프로덕션 요구사항은 비범위.
-- **LR 모델은 합성 분포에 특화** — 실 운영 워크로드 (white-list 우회, encrypted backup tool, full-disk-encryption agent 등) 에서 FP/FN 가능성. `docs/AC5-results.md` §4.5 (size_mean 직교성), §4.1 (window 정규화 한계) 참조. 운영급 전환은 fanotify 실 trace 캡처 + entropy feature 추가 + 비선형 모델 (RandomForest 등) 필요.
+- **LR 모델은 합성 분포에 특화** — 실 운영 워크로드 (white-list 우회, encrypted backup tool, full-disk-encryption agent 등) 에서 FP/FN 가능성. `docs/AC5-results.md` §4.5 (size_mean 직교성), §4.1 (window 정규화 한계) 참조.
+- **8 KB 이상 uniform write burst 는 FP 발생 ⚠ (Codex 2차 audit)**: 200-write 기준 4KB→benign(0.0008), **8KB→ransomware(0.96)**, 16KB+→1.0. 즉 `dd`/`tar` 압축 해제/사진 백업/db dump 같은 합법 워크로드가 8KB 이상 mean size 면 차단됨. 운영급 전환은 fanotify 실 trace 캡처 + entropy feature 추가 + 비선형 모델 (RandomForest 등) 필요. 자세한 경계는 `docs/AC5-results.md` §4.6.
