@@ -77,7 +77,6 @@ export default function App() {
 
   const killedPidsRef = useRef<Set<number>>(new Set());
   
-  // 통계 위젯을 위한 상태
   const [blockedCount, setBlockedCount] = useState(0);
 
   const handleMessage = useCallback((m: WsMessage) => {
@@ -90,7 +89,6 @@ export default function App() {
 
       const id = String(pid);
       
-      // ★ 에러 방어 로직: image_path가 없거나 문자열이 아닐 때도 다운되지 않도록 안전하게 처리
       const imgPath = typeof payload.image_path === "string" ? payload.image_path : "";
       const processName = imgPath ? imgPath.split(/[/\\]/).pop() : `PID: ${pid}`;
 
@@ -100,7 +98,7 @@ export default function App() {
         const data: VelxorNodeData = {
           ...payload,
           pid: pid,
-          label: `${processName}`, // 라벨 간소화
+          label: `${processName}`, 
           state: "normal",
         };
 
@@ -351,26 +349,33 @@ export default function App() {
             style={{
               flex: 3,
               minWidth: 0,
-              position: "relative", // 떠 있는 위젯 기준점
-              // ★ 텅 빈 배경을 채우는 사이버펑크 그리드 패턴 추가
+              position: "relative",
               backgroundImage: `linear-gradient(rgba(0, 255, 204, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 204, 0.04) 1px, transparent 1px)`,
               backgroundSize: "40px 40px",
             }}
           >
-            {/* ★ 텅 빈 배경 우측 상단을 채우는 시스템 요약 위젯 */}
+            {/* ★ 확장된 시스템 요약 위젯 & 동적 그래프 */}
             <div style={{
               position: "absolute", top: 16, right: 16, zIndex: 10,
+              width: "220px", // 위젯 크기를 키움
               background: "rgba(15, 20, 27, 0.8)", backdropFilter: "blur(4px)",
-              padding: "12px", borderRadius: "8px", border: "1px solid rgba(0, 255, 204, 0.2)",
+              padding: "16px", borderRadius: "8px", border: "1px solid rgba(0, 255, 204, 0.2)",
               display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "#8B949E",
-              boxShadow: "0 4px 6px rgba(0,0,0,0.3)"
+              boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
             }}>
-              <div style={{ color: "#E6EDF3", fontWeight: "bold", marginBottom: "4px" }}>System Metrics</div>
-              <div style={{ display: "flex", justifyContent: "space-between", width: "140px" }}>
-                <span>Active Nodes:</span> <span style={{ color: "#00ffcc" }}>{nodes.length}</span>
+              <div style={{ color: "#E6EDF3", fontWeight: "bold", marginBottom: "8px", letterSpacing: "1px" }}>SYSTEM METRICS</div>
+              
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Active Nodes</span> <span style={{ color: "#00ffcc", fontWeight: "bold" }}>{nodes.length}</span>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", width: "140px" }}>
-                <span>Threats Blocked:</span> <span style={{ color: blockedCount > 0 ? "#ff3333" : "#8B949E" }}>{blockedCount}</span>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Threats Blocked</span> <span style={{ color: blockedCount > 0 ? "#ff3333" : "#8B949E", fontWeight: "bold" }}>{blockedCount}</span>
+              </div>
+              
+              {/* 여기에 실시간 요동치는 그래프 추가 */}
+              <div style={{ marginTop: "8px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                <MiniSparkline label="CORE CPU USAGE" color="#ffcc00" />
+                <MiniSparkline label="KERNEL I/O EVENT" color="#00ffcc" />
               </div>
             </div>
 
@@ -442,6 +447,45 @@ function AlertStrip({ alerts }: { alerts: AlertEntry[]; }) {
           [{a.severity}] {a.message}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ★ 새로 추가된 컴포넌트: 실시간 리소스 변동을 그려주는 SVG 꺾은선 그래프
+function MiniSparkline({ color, label }: { color: string; label: string }) {
+  const [data, setData] = useState<number[]>(Array(20).fill(20));
+
+  useEffect(() => {
+    // 0.8초 ~ 1.2초마다 랜덤하게 위아래로 튀는 값 생성 (진짜 데이터인 척 연출)
+    const interval = setInterval(() => {
+      setData((prev) => {
+        let nextVal = prev[prev.length - 1] + (Math.random() * 40 - 20);
+        if (nextVal < 10) nextVal = 10 + Math.random() * 15;
+        if (nextVal > 90) nextVal = 90 - Math.random() * 10;
+        return [...prev.slice(1), nextVal];
+      });
+    }, 800 + Math.random() * 400); 
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const height = 30;
+  const width = 200;
+  const step = width / (data.length - 1);
+  const points = data.map((d, i) => `${i * step},${height - (d / 100) * height}`).join(" ");
+
+  return (
+    <div style={{ marginBottom: "12px" }}>
+      <div style={{ fontSize: "10px", color: "#8B949E", marginBottom: "4px", display: "flex", justifyContent: "space-between" }}>
+        <span>{label}</span>
+        <span style={{ color: color }}>{Math.round(data[data.length - 1])}%</span>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "30px", overflow: "visible" }}>
+        {/* 그래프 아래 채우기(Area) */}
+        <polygon points={`0,${height} ${points} ${width},${height}`} fill={`${color}1A`} />
+        {/* 꺾은선(Line) */}
+        <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
     </div>
   );
 }
