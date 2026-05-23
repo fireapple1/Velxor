@@ -33,21 +33,21 @@
   color: var(--ink);
 }
 .reveal { background: var(--bg); }
-.reveal .slides section { padding: 0 3rem; text-align: left; }
+.reveal .slides section { padding: 0 2rem; text-align: left; }
 .reveal .slides section.center { text-align: center; }
 
 .reveal h1 {
-  font-size: 3.4em;
+  font-size: 2.8em;
   font-weight: 800;
   letter-spacing: -0.04em;
   margin: 0;
   line-height: 1.05;
 }
 .reveal h2 {
-  font-size: 1.8em;
+  font-size: 1.5em;
   font-weight: 800;
   letter-spacing: -0.02em;
-  margin: 0 0 0.8em;
+  margin: 0 0 0.45em;
   padding: 0;
   display: flex;
   align-items: baseline;
@@ -127,7 +127,7 @@
 }
 .bignum .num {
   font-family: var(--mono);
-  font-size: 5em;
+  font-size: 3.8em;
   font-weight: 800;
   line-height: 1;
   color: var(--ink);
@@ -165,8 +165,8 @@
 .kcard {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1.2em 1.4em;
+  border-radius: 10px;
+  padding: 0.7em 0.95em;
 }
 .kcard .k {
   font-size: 1.0em;
@@ -208,7 +208,7 @@
   background: var(--bg-alt);
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 1em 1.1em;
+  padding: 0.6em 0.9em;
 }
 .flow .step .n {
   font-family: var(--mono);
@@ -320,8 +320,8 @@
 }
 .kpi {
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1em 1.2em;
+  border-radius: 10px;
+  padding: 0.7em 0.9em;
   background: var(--bg);
 }
 .kpi .k-label {
@@ -372,14 +372,14 @@
 .arch {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.5em;
+  gap: 0.25em;
   font-family: inherit;
-  margin: 0.4em 0;
+  margin: 0.2em 0;
 }
 .arch .layer {
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 0.9em 1.2em;
+  padding: 0.55em 1em;
   background: var(--bg);
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -431,8 +431,8 @@
   background: var(--warn-soft);
   border-left: 4px solid var(--warn);
   border-radius: 8px;
-  padding: 1em 1.3em;
-  margin: 0.3em 0;
+  padding: 0.55em 1em;
+  margin: 0.25em 0;
 }
 .note-card .nt {
   font-size: 0.75em;
