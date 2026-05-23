@@ -22,8 +22,8 @@ type Props = {
 };
 
 // ★ 납작함을 완전 해결하기 위해 가로/세로를 1:1 완벽 정대칭 정육각형 크기로 고정
-const NODE_W = 140;
-const NODE_H = 140;
+const NODE_W = 150;
+const NODE_H = 130;
 
 function VelxorNodeView({ data, selected }: NodeProps<VelxorNode>) {
   const isThreat = data.state === "threat";

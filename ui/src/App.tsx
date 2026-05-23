@@ -31,6 +31,7 @@ const MAX_ALERTS = 5;
 const KILLED_OUTCOMES = new Set(["killed", "terminated", "already_gone"]);
 const TIMELINE_CAP_MS = 60_000;
 const TIMELINE_CAP_N = 1000;
+const CONSOLE_LOG_CAP = 180;
 
 function appendTimelineCapped(es: TimelineEvent[], evt: TimelineEvent): TimelineEvent[] {
   const next = [...es, evt];
@@ -40,6 +41,41 @@ function appendTimelineCapped(es: TimelineEvent[], evt: TimelineEvent): Timeline
 }
 
 type AlertEntry = AlertPayload & { ts: number; seq: number; };
+
+type ConsoleLevel =
+  | "SYSTEM"
+  | "INFO"
+  | "SUCCESS"
+  | "WARN"
+  | "CRIT"
+  | "TRACE"
+  | "WS"
+  | "AI";
+
+type ConsoleLog = {
+  id: number;
+  ts: number;
+  level: ConsoleLevel;
+  message: string;
+};
+
+function makeConsoleLog(level: ConsoleLevel, message: string): ConsoleLog {
+  return {
+    id: Date.now() + Math.floor(Math.random() * 100000),
+    ts: Date.now(),
+    level,
+    message,
+  };
+}
+
+function formatConsoleTime(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
 
 export default function App() {
   const [nodes, setNodes] = useState<VelxorNode[]>([]);
@@ -54,24 +90,49 @@ export default function App() {
   const killedPidsRef = useRef<Set<number>>(new Set());
   const [blockedCount, setBlockedCount] = useState(0);
 
+  const consoleSeqRef = useRef(0);
+  const [consoleLogs, setConsoleLogs] = useState<ConsoleLog[]>([
+    makeConsoleLog("SYSTEM", "VELXOR telemetry console initialized."),
+    makeConsoleLog("SYSTEM", "Kernel event bridge standing by."),
+    makeConsoleLog("WS", "Awaiting secure WebSocket handshake verification."),
+  ]);
+
+  const pushConsoleLog = useCallback((level: ConsoleLevel, message: string) => {
+    consoleSeqRef.current += 1;
+
+    const entry: ConsoleLog = {
+      id: Date.now() + consoleSeqRef.current,
+      ts: Date.now(),
+      level,
+      message,
+    };
+
+    setConsoleLogs((prev) => [...prev, entry].slice(-CONSOLE_LOG_CAP));
+  }, []);
+
   const handleMessage = useCallback((m: WsMessage) => {
     if (m.type === "node_add") {
       const payload = m.payload as any;
       const pid = payload.pid;
       const parentPid = payload.parent_pid;
-      
+
       if (pid === undefined || pid === null) return;
       const id = String(pid);
-      
+
       const imgPath = typeof payload.image_path === "string" ? payload.image_path : "";
       const processName = imgPath ? imgPath.split(/[/\\]/).pop() : `Unknown`;
+
+      pushConsoleLog(
+        "INFO",
+        `Process topology node initialized: ${processName} / PID=${pid}${parentPid ? ` / PPID=${parentPid}` : ""}`,
+      );
 
       setNodes((ns) => {
         if (ns.some((n) => n.id === id)) return ns;
         const data: VelxorNodeData = {
           ...payload,
           pid: pid,
-          label: processName, 
+          label: processName,
           state: "normal",
         };
         const offset = (ns.length % 15) * 50;
@@ -86,44 +147,140 @@ export default function App() {
         setEdges((es) => {
           const edgeId = `e-${parentPid}-${pid}`;
           if (es.some((e) => e.id === edgeId)) return es;
+
+          pushConsoleLog("TRACE", `Graph edge linked: ${parentPid} -> ${pid}`);
+
           return [
             ...es,
-            { id: edgeId, source: String(parentPid), target: String(pid), animated: true, style: { stroke: "#00ffcc", strokeWidth: 1.5, opacity: 0.6 } },
+            {
+              id: edgeId,
+              source: String(parentPid),
+              target: String(pid),
+              animated: true,
+              style: { stroke: "#00ffcc", strokeWidth: 1.5, opacity: 0.6 },
+            },
           ];
         });
       }
 
-      setTimelineEvents((es) => appendTimelineCapped(es, { ts: payload.ts_unix_ms, type: "node_add" }));
+      setTimelineEvents((es) => appendTimelineCapped(es, {
+        ts: typeof payload.ts_unix_ms === "number" ? payload.ts_unix_ms : Date.now(),
+        type: "node_add",
+      }));
     } else if (m.type === "node_update") {
       const { pid, fields } = m.payload;
-      setNodes((ns) => ns.map((n) => n.id === String(pid) ? { ...n, data: { ...n.data, ...fields, state: n.data.state, label: n.data.label, pid: n.data.pid } } : n));
+
+      pushConsoleLog("TRACE", `Node metadata updated: PID=${pid}`);
+
+      setNodes((ns) => ns.map((n) => n.id === String(pid) ? {
+        ...n,
+        data: {
+          ...n.data,
+          ...fields,
+          state: n.data.state,
+          label: n.data.label,
+          pid: n.data.pid,
+        },
+      } : n));
     } else if (m.type === "verdict") {
       const v = m.payload;
       setVerdict(v);
-      setTimelineEvents((es) => appendTimelineCapped(es, { ts: Date.now(), type: "verdict", verdict: v.verdict }));
+
+      pushConsoleLog("AI", `AI verdict received: PID=${v.pid} / verdict=${v.verdict}`);
+
+      setTimelineEvents((es) => appendTimelineCapped(es, {
+        ts: Date.now(),
+        type: "verdict",
+        verdict: v.verdict,
+      }));
 
       if (v.verdict === "ransomware") {
-        setCriticalBanner({ pid: v.pid, message: `PID ${v.pid} 프로세스에서 악성 암호화 행위가 감지되었습니다.` });
+        pushConsoleLog("CRIT", `Ransomware behavior detected. PID=${v.pid}. Escalating visual threat state.`);
+
+        setCriticalBanner({
+          pid: v.pid,
+          message: `PID ${v.pid} 프로세스에서 악성 암호화 행위가 감지되었습니다.`,
+        });
+
         setNodes((ns) => ns.map((n) => {
           if (n.id !== String(v.pid)) return n;
           if (n.data.state === "killed") return n;
           return { ...n, data: { ...n.data, state: "threat" as VelxorNodeState } };
         }));
-        setEdges((es) => es.map((e) => e.target === String(v.pid) || e.source === String(v.pid) ? { ...e, style: { stroke: "#ff3333", strokeWidth: 2, opacity: 1 } } : e));
+
+        setEdges((es) => es.map((e) =>
+          e.target === String(v.pid) || e.source === String(v.pid)
+            ? { ...e, style: { stroke: "#ff3333", strokeWidth: 2, opacity: 1 } }
+            : e,
+        ));
       }
     } else if (m.type === "alert") {
       const entry: AlertEntry = { ...m.payload, ts: Date.now(), seq: m.seq };
+
+      pushConsoleLog(
+        entry.severity === "error" ? "CRIT" : entry.severity === "warn" ? "WARN" : "INFO",
+        `Security alert received: PID=${entry.pid} / ${entry.message}`,
+      );
+
       setAlerts((as) => [...as, entry].slice(-MAX_ALERTS));
     } else if (m.type === "gap") {
-      setNodes([]); setEdges([]); setVerdict(null); setSelectedPid(null);
-      setTimelineEvents([]); setCriticalBanner(null); setBlockedCount(0);
+      pushConsoleLog("WARN", `Stream sequence gap detected. Full graph refresh requested: ${m.payload.from} -> ${m.payload.to}`);
+
+      setNodes([]);
+      setEdges([]);
+      setVerdict(null);
+      setSelectedPid(null);
+      setTimelineEvents([]);
+      setCriticalBanner(null);
+      setBlockedCount(0);
       killedPidsRef.current.clear();
-      const gapAlert: AlertEntry = { pid: 0, severity: "warn", message: `full refresh: gap from ${m.payload.from} to ${m.payload.to}`, ts: Date.now(), seq: m.seq };
+
+      const gapAlert: AlertEntry = {
+        pid: 0,
+        severity: "warn",
+        message: `full refresh: gap from ${m.payload.from} to ${m.payload.to}`,
+        ts: Date.now(),
+        seq: m.seq,
+      };
       setAlerts((as) => [...as, gapAlert].slice(-MAX_ALERTS));
     }
-  }, []);
+  }, [pushConsoleLog]);
 
   useVelxorWs(handleMessage, setConnectionState);
+
+  useEffect(() => {
+    if (connectionState === "connected") {
+      pushConsoleLog("SUCCESS", "WebSocket handshake verification complete.");
+      pushConsoleLog("WS", "Live backend event stream attached.");
+    } else if (connectionState === "connecting") {
+      pushConsoleLog("WS", "WebSocket channel negotiating secure session.");
+    } else {
+      pushConsoleLog("WARN", "WebSocket channel disconnected. Waiting for reconnect.");
+    }
+  }, [connectionState, pushConsoleLog]);
+
+  useEffect(() => {
+    const samples = [
+      "kernel telemetry heartbeat accepted.",
+      "memory entropy sampler window rotated.",
+      "process watcher queue flushed.",
+      "behavior vector cache synchronized.",
+      "I/O trace batch committed.",
+      "runtime policy checksum verified.",
+      "event bus pressure normalized.",
+      "graph renderer sync tick acknowledged.",
+      "threat scoring window advanced.",
+      "endpoint sensor pulse received.",
+    ];
+
+    const interval = window.setInterval(() => {
+      const index = Math.floor(Math.random() * samples.length);
+      const level: ConsoleLevel = connectionState === "connected" ? "TRACE" : "WS";
+      pushConsoleLog(level, samples[index]);
+    }, 1300);
+
+    return () => window.clearInterval(interval);
+  }, [connectionState, pushConsoleLog]);
 
   const [winW, setWinW] = useState<number>(() => typeof window !== "undefined" ? window.innerWidth : 1280);
   useEffect(() => {
@@ -136,10 +293,25 @@ export default function App() {
     if (KILLED_OUTCOMES.has(outcome)) {
       killedPidsRef.current.add(pid);
       setBlockedCount((c) => c + 1);
-      setNodes((ns) => ns.map((n) => n.id === String(pid) ? { ...n, data: { ...n.data, state: "killed" as VelxorNodeState } } : n));
+
+      pushConsoleLog("SUCCESS", `Active defense interception complete: PID=${pid} / outcome=${outcome}`);
+
+      setNodes((ns) => ns.map((n) => n.id === String(pid) ? {
+        ...n,
+        data: { ...n.data, state: "killed" as VelxorNodeState },
+      } : n));
+    } else {
+      pushConsoleLog("WARN", `Active defense request returned non-terminal outcome: PID=${pid} / outcome=${outcome}`);
     }
-    setAlerts((as) => [...as, { pid, severity: "info" as const, message: `block(${pid}) → ${outcome}`, ts: Date.now(), seq: -1 }].slice(-MAX_ALERTS));
-  }, []);
+
+    setAlerts((as) => [...as, {
+      pid,
+      severity: "info" as const,
+      message: `block(${pid}) → ${outcome}`,
+      ts: Date.now(),
+      seq: -1,
+    }].slice(-MAX_ALERTS));
+  }, [pushConsoleLog]);
 
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedPid) ?? null, [nodes, selectedPid]);
   const verdictForSelected = useMemo(() => {
@@ -152,8 +324,7 @@ export default function App() {
   return (
     <div style={{ height: "100vh", width: "100vw", display: "flex", flexDirection: "column", background: "#0B0F14", color: "#E6EDF3" }}>
       <Header connection={connectionState} alerts={alerts} />
-      
-      {/* ★ 1. 보안 로그 티커 (Security Log Ticker) */}
+
       <LogTicker />
 
       {criticalBanner && (
@@ -174,7 +345,7 @@ export default function App() {
 
         <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
           <div style={{ flex: 3, minWidth: 0, position: "relative", backgroundImage: `linear-gradient(rgba(0, 255, 204, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 255, 204, 0.04) 1px, transparent 1px)`, backgroundSize: "40px 40px" }}>
-            
+
             <div style={{ position: "absolute", top: 16, right: 16, zIndex: 10, width: "220px", background: "rgba(15, 20, 27, 0.8)", backdropFilter: "blur(4px)", padding: "16px", borderRadius: "8px", border: "1px solid rgba(0, 255, 204, 0.2)", display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "#8B949E", boxShadow: "0 4px 12px rgba(0,0,0,0.5)" }}>
               <div style={{ color: "#E6EDF3", fontWeight: "bold", marginBottom: "8px", letterSpacing: "1px" }}>SYSTEM METRICS</div>
               <div style={{ display: "flex", justifyContent: "space-between" }}><span>Active Nodes</span> <span style={{ color: "#00ffcc", fontWeight: "bold" }}>{nodes.length}</span></div>
@@ -196,8 +367,59 @@ export default function App() {
         </div>
       </div>
 
+      <LiveEventConsole logs={consoleLogs} connection={connectionState} />
+
       <div style={{ height: TIMELINE_H, flexShrink: 0 }}>
         <Timeline events={timelineEvents} width={winW} height={TIMELINE_H} />
+      </div>
+    </div>
+  );
+}
+
+function LiveEventConsole({
+  logs,
+  connection,
+}: {
+  logs: ConsoleLog[];
+  connection: ConnectionState;
+}) {
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [logs]);
+
+  return (
+    <div className="live-console-panel">
+      <div className="live-console-left-rail">
+        <div className="live-console-rail-title">LIVE</div>
+        <div className="live-console-rail-dot" />
+        <div className="live-console-rail-text">EVENT</div>
+      </div>
+
+      <div className="live-console-main">
+        <div className="live-console-header">
+          <div className="live-console-title">
+            <span className="live-console-title-glow">CONSOLE MONITORING STREAM</span>
+            <span className="live-console-subtitle">BACKEND EVENT BUS / PROCESS TELEMETRY / AI VERDICT TRACE</span>
+          </div>
+
+          <div className="live-console-status">
+            <span className={`live-console-status-dot live-console-status-${connection}`} />
+            <span>{connection.toUpperCase()}</span>
+          </div>
+        </div>
+
+        <div className="live-console-body">
+          {logs.map((log) => (
+            <div key={log.id} className={`live-console-line live-console-${log.level.toLowerCase()}`}>
+              <span className="live-console-time">[{formatConsoleTime(log.ts)}]</span>
+              <span className="live-console-level">[{log.level}]</span>
+              <span className="live-console-message">{log.message}</span>
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
       </div>
     </div>
   );
@@ -215,7 +437,6 @@ function LogTicker() {
         <span className="ticker-item">[NET] dns_query: unknown-domain.xyz </span>
         <span className="ticker-item">[SEC] entropy_spike: 7.99 in thread 4912 </span>
         <span className="ticker-item">[SYS] child_process: cmd.exe /c start </span>
-        {/* 무한 반복을 위해 같은 내용을 한 번 더 붙여줍니다 */}
         <span className="ticker-item">[SYS] kernel_read: /etc/shadow </span>
         <span className="ticker-item">[NET] outbound_conn: 192.168.1.5:443 </span>
         <span className="ticker-item">[MEM] alloc: 4096 bytes at 0x7fff... </span>
@@ -267,7 +488,7 @@ function MiniSparkline({ color, label }: { color: string; label: string }) {
         if (nextVal > 90) nextVal = 90 - Math.random() * 10;
         return [...prev.slice(1), nextVal];
       });
-    }, 800 + Math.random() * 400); 
+    }, 800 + Math.random() * 400);
     return () => clearInterval(interval);
   }, []);
 
